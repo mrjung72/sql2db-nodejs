@@ -1,28 +1,70 @@
-const MSSQLConnectionManager = require('../src/mssql-connection-manager');
+const sql = require('mssql');
+const FKAnalyzer = require('../src/db/fk-analyzer');
 require('dotenv').config();
 
 // FK 관계 분석 테스트
 async function testForeignKeyAnalysis() {
     console.log('🔍 FK 참조 관계 분석 테스트 시작\n');
-    
-    const connectionManager = new MSSQLConnectionManager();
-    
+
+    // 단일 타겟 DB 풀 구성 (환경변수 기반)
+    const config = {
+        server: process.env.DB_SERVER,
+        database: process.env.DB_NAME,
+        user: process.env.DB_USER,
+        password: process.env.DB_PASSWORD,
+        options: {
+            encrypt: process.env.DB_ENCRYPT !== 'false',
+            trustServerCertificate: process.env.DB_TRUST_CERT !== 'false'
+        }
+    };
+
+    let pool = null;
+
+    // FKAnalyzer에 필요한 콜백 제공
+    const fkAnalyzer = new FKAnalyzer({
+        getPool: () => pool,
+        ensureConnected: async () => {
+            if (!pool || !pool.connected) {
+                pool = new sql.ConnectionPool(config);
+                await pool.connect();
+            }
+        },
+        msg: {
+            sourceDb: 'SOURCE_DB',
+            targetDb: 'TARGET_DB',
+            fkQueryingDb: 'FK 관계를 조회 중입니다: {db}',
+            fkFoundInDb: 'FK 관계 조회 완료: {db}, count={count}',
+            fkQueryFailed: 'FK 관계 조회 실패: {db}, message={message}',
+            calculatingDeletionOrder: '테이블 {count}개에 대한 삭제 순서를 계산 중...',
+            relevantFkCount: '관련 FK 관계 수: {count}',
+            circularRefDetected: '순환 참조 감지: {tables}',
+            circularRefWarning: '순환 참조가 있어 삭제 순서가 완전하지 않을 수 있습니다.',
+            calculatedDeletionOrder: '삭제 순서 계산 완료: {order}',
+            deletionOrderFailed: '삭제 순서 계산 실패: {message}',
+            fkEnable: '활성화',
+            fkDisable: '비활성화',
+            togglingFk: 'FK 제약 조건 {action} 중... ({db})',
+            fkToggleComplete: 'FK 제약 조건 {action} 완료 ({db})',
+            fkToggleFailed: 'FK 제약 조건 {action} 실패: {message}'
+        }
+    });
+
     try {
         console.log('1. 데이터베이스 연결 테스트...');
-        
+
         // 대상 데이터베이스 연결 (FK 관계 분석용)
-        await connectionManager.connectTarget();
+        await fkAnalyzer.ensureConnected?.(false) ?? fkAnalyzer.getForeignKeyRelations(false);
         console.log('✅ 대상 데이터베이스 연결 성공\n');
-        
+
         console.log('2. FK 참조 관계 조회 중...');
-        const fkRelations = await connectionManager.getForeignKeyRelations(false);
-        
+        const fkRelations = await fkAnalyzer.getForeignKeyRelations(false);
+
         if (fkRelations.length === 0) {
             console.log('❌ FK 관계가 발견되지 않았습니다.');
             console.log('테스트용 FK 관계를 생성하거나 다른 데이터베이스를 사용해주세요.\n');
         } else {
             console.log(`✅ ${fkRelations.length}개의 FK 관계 발견\n`);
-            
+
             console.log('📋 발견된 FK 관계들:');
             console.log('=' .repeat(80));
             fkRelations.forEach((rel, index) => {
@@ -32,50 +74,56 @@ async function testForeignKeyAnalysis() {
                 console.log(`   업데이트 규칙: ${rel.updateAction}\n`);
             });
         }
-        
+
         console.log('3. 테이블 삭제 순서 계산 테스트...');
-        
+
         // 테스트용 테이블 목록 (실제 존재하는 테이블들로 구성)
         const testTables = [...new Set([
             ...fkRelations.map(rel => rel.parentTable),
             ...fkRelations.map(rel => rel.referencedTable)
         ])];
-        
+
         if (testTables.length === 0) {
             // FK 관계가 없는 경우 일반적인 테이블 이름들로 테스트
             testTables.push('users', 'orders', 'order_items', 'products', 'categories');
             console.log('FK 관계가 없으므로 가상 테이블로 테스트합니다.');
         }
-        
+
         console.log(`테스트 대상 테이블: ${testTables.join(', ')}\n`);
-        
-        const deletionOrder = await connectionManager.calculateTableDeletionOrder(testTables, false);
-        
+
+        const deletionOrder = await fkAnalyzer.calculateTableDeletionOrder(testTables, false);
+
         console.log('📊 계산 결과:');
         console.log('=' .repeat(50));
         console.log(`삭제 순서: ${deletionOrder.order.join(' → ')}`);
         console.log(`순환 참조 여부: ${deletionOrder.hasCircularReference ? 'Yes' : 'No'}`);
-        
+
         if (deletionOrder.hasCircularReference) {
             console.log(`순환 참조 테이블: ${deletionOrder.circularTables.join(', ')}`);
         }
-        
+
         console.log(`관련 FK 관계 수: ${deletionOrder.fkRelations.length}`);
-        
+
         console.log('\n4. FK 제약 조건 토글 테스트...');
-        
+
         // FK 제약 조건 비활성화 테스트 (실제로는 실행하지 않음)
         console.log('⚠️ FK 제약 조건 토글은 데이터베이스에 영향을 주므로 실제 실행하지 않습니다.');
         console.log('실제 환경에서는 다음과 같이 사용합니다:');
-        console.log('  await connectionManager.toggleForeignKeyConstraints(false, false); // 비활성화');
-        console.log('  await connectionManager.toggleForeignKeyConstraints(true, false);  // 활성화');
-        
+        console.log('  await fkAnalyzer.toggleForeignKeyConstraints(false, false); // 비활성화');
+        console.log('  await fkAnalyzer.toggleForeignKeyConstraints(true, false);  // 활성화');
+
     } catch (error) {
         console.error('❌ 테스트 실패:', error.message);
         console.error('스택 트레이스:', error.stack);
     } finally {
-        await connectionManager.closeConnections();
-        console.log('\n✅ 연결 종료 완료');
+        if (pool) {
+            try {
+                await pool.close();
+                console.log('\n✅ 연결 종료 완료');
+            } catch (e) {
+                console.error('연결 종료 중 오류:', e.message);
+            }
+        }
     }
 }
 
@@ -83,6 +131,7 @@ async function testForeignKeyAnalysis() {
 function testTopologicalSort() {
     console.log('\n🧮 토폴로지 정렬 알고리즘 단위 테스트');
     console.log('=' .repeat(50));
+
     
     // 테스트 케이스 1: 단순한 의존성 체인
     console.log('\n테스트 케이스 1: 단순한 의존성 체인');

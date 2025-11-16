@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const MSSQLConnectionManager = require('./mssql-connection-manager');
+const ConnectionManager = require('./connection-manager');
 const ProgressManager = require('./progress-manager');
 const logger = require('./logger');
 const { getAppRoot } = require('./modules/paths');
@@ -271,8 +271,8 @@ class MSSQLDataMigrator {
         // 현재 쿼리 추적
         this.currentQuery = null;
         
-        // 기본 컴포넌트
-        this.connectionManager = new MSSQLConnectionManager();
+        // 기본 컴포넌트: 항상 멀티 DB용 ConnectionManager 사용
+        this.connectionManager = new ConnectionManager();
         this.progressManager = null;
         
         // 모듈화된 컴포넌트들
@@ -389,7 +389,44 @@ class MSSQLDataMigrator {
                     targetConfig.isWritable = targetConfig.isWritable ?? true;
                     targetConfig.description = targetConfig.description || this.msg.directConfiguredTarget;
                 }
+
+                // MULTI_DB overrides via env (from CLI options)
+                if (process.env.MULTI_DB === 'true') {
+                    if (process.env.SOURCE_DB_OVERRIDE) {
+                        const srcOverrideId = process.env.SOURCE_DB_OVERRIDE;
+                        try {
+                            const cfg = this.getDbConfigById(srcOverrideId);
+                            sourceConfig = cfg;
+                        } catch (_) {}
+                    }
+                    if (process.env.TARGET_DB_OVERRIDE) {
+                        const tgtOverrideId = process.env.TARGET_DB_OVERRIDE;
+                        try {
+                            const cfg = this.getDbConfigById(tgtOverrideId);
+                            if (!cfg.isWritable) {
+                                throw new Error(`${this.msg.targetDbReadOnly} '${tgtOverrideId}'${this.msg.targetDbReadOnlyError}`);
+                            }
+                            targetConfig = cfg;
+                        } catch (e) {
+                            if (e && e.message) throw e;
+                        }
+                    }
+                }
                 
+                // dbinfo.json에 정의된 모든 DB를 ConnectionManager에 등록 (멀티 DB 동적변수용)
+                const dbInfo = this.configManager.getDbInfo && this.configManager.getDbInfo();
+                if (dbInfo) {
+                    Object.keys(dbInfo).forEach((dbId) => {
+                        try {
+                            const cfg = this.getDbConfigById(dbId);
+                            this.connectionManager.upsertDbConfig(dbId, cfg);
+                        } catch (e) {
+                            // 개별 DB 설정에 문제가 있어도 전체 로드는 계속 진행
+                        }
+                    });
+                }
+
+                // source/target DB는 기존 방식대로 설정 (호환성 유지)
                 this.connectionManager.setCustomDatabaseConfigs(sourceConfig, targetConfig);
             } else {
                 logger.info(this.msg.usingEnvVars);
@@ -1229,33 +1266,51 @@ class MSSQLDataMigrator {
      * 개별 DB 연결 테스트
      */
     async testSingleDbConnection(dbConfig) {
-        const sql = require('mssql');
-        let pool = null;
-        
-        try {
-            pool = new sql.ConnectionPool(dbConfig);
-            await pool.connect();
-            await pool.close();
-            
-            return {
-                success: true,
-                message: this.msg.connectionSuccess,
-                responseTime: null
-            };
-        } catch (error) {
-            if (pool) {
-                try {
-                    await pool.close();
-                } catch (closeError) {
-                    // 무시
-                }
+        if (process.env.MULTI_DB === 'true') {
+            const cm = new ConnectionManager();
+            const dbId = dbConfig.id || 'test';
+            try {
+                cm.upsertDbConfig(dbId, dbConfig);
+                await cm.connect(dbId);
+                const adapter = cm.getAdapter(dbId);
+                const testSql = adapter.getTestQuery();
+                await adapter.query(testSql);
+                await cm.disconnect(dbId);
+                return {
+                    success: true,
+                    message: this.msg.connectionSuccess,
+                    responseTime: null
+                };
+            } catch (error) {
+                try { await cm.disconnect(dbId); } catch (_) {}
+                return {
+                    success: false,
+                    message: error.message,
+                    error: error.code || 'UNKNOWN_ERROR'
+                };
             }
-            
-            return {
-                success: false,
-                message: error.message,
-                error: error.code || 'UNKNOWN_ERROR'
-            };
+        } else {
+            const sql = require('mssql');
+            let pool = null;
+            try {
+                pool = new sql.ConnectionPool(dbConfig);
+                await pool.connect();
+                await pool.close();
+                return {
+                    success: true,
+                    message: this.msg.connectionSuccess,
+                    responseTime: null
+                };
+            } catch (error) {
+                if (pool) {
+                    try { await pool.close(); } catch (_) {}
+                }
+                return {
+                    success: false,
+                    message: error.message,
+                    error: error.code || 'UNKNOWN_ERROR'
+                };
+            }
         }
     }
 

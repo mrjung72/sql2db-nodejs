@@ -17,7 +17,7 @@ src/
 │
 ├── mssql-data-migrator-modular.js  # 모듈화된 메인 클래스 (권장)
 ├── mssql-data-migrator.js          # 레거시 모놀리식 클래스
-├── mssql-connection-manager.js     # DB 연결 관리
+├── connection-manager.js           # 다중 DB 연결 관리
 ├── progress-manager.js             # 진행 상황 관리
 ├── logger.js                       # 로깅 유틸리티
 └── migrate-cli.js                  # CLI 인터페이스

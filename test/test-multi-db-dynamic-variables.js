@@ -5,7 +5,8 @@
  */
 
 const MSSQLDataMigrator = require('../src/mssql-data-migrator-modular');
-const MSSQLConnectionManager = require('../src/mssql-connection-manager');
+const ConnectionManager = require('../src/connection-manager');
+const ConfigManager = require('../src/modules/config-manager');
 
 // 테스트 설정
 const testConfig = {
@@ -57,23 +58,31 @@ async function testMultiDBDynamicVariables() {
     console.log('🚀 다중 DB 동적변수 테스트 시작\n');
     
     try {
-        // 1. Connection Manager 테스트
-        console.log('1️⃣ Connection Manager 테스트');
-        const connectionManager = new MSSQLConnectionManager();
-        
+        // 1. Connection Manager + ConfigManager 테스트 (멀티 DB 구조)
+        console.log('1️⃣ ConnectionManager + ConfigManager 테스트');
+
+        const configManager = new ConfigManager();
+        const connectionManager = new ConnectionManager(console);
+
         // dbinfo.json 로드 테스트
-        const dbConfigs = connectionManager.loadDBConfigs();
-        if (dbConfigs) {
-            console.log(`   ✅ dbinfo.json 로드 성공: ${Object.keys(dbConfigs.dbs).length}개 DB`);
-            console.log(`   📋 사용 가능한 DB: ${Object.keys(dbConfigs.dbs).join(', ')}`);
+        const dbInfo = await configManager.loadDbInfo();
+        if (dbInfo) {
+            const dbKeys = Object.keys(dbInfo);
+            console.log(`   ✅ dbinfo.json 로드 성공: ${dbKeys.length}개 DB`);
+            console.log(`   📋 사용 가능한 DB: ${dbKeys.join(', ')}`);
+
+            // ConnectionManager에 구성 반영
+            for (const [dbId, cfg] of Object.entries(dbInfo)) {
+                connectionManager.upsertDbConfig(dbId, { id: dbId, type: 'mssql', ...cfg });
+            }
         } else {
             console.log('   ❌ dbinfo.json 로드 실패');
             return;
         }
-        
-        // 사용 가능한 DB 키 목록 테스트
+
+        // 사용 가능한 DB 키 목록 테스트 (ConnectionManager 기준)
         const availableDBs = connectionManager.getAvailableDBKeys();
-        console.log(`   🔑 사용 가능한 DB 키: ${availableDBs.join(', ')}`);
+        console.log(`   🔑 ConnectionManager 기준 사용 가능한 DB 키: ${availableDBs.join(', ')}`);
         
         console.log('');
         

@@ -77,22 +77,26 @@ class ConfigManager {
         }
         
         const dbConfig = this.dbInfo[dbId];
+        const type = (dbConfig.type || 'mssql').toLowerCase();
         return {
             id: dbId,
+            type,
             server: dbConfig.server,
-            port: dbConfig.port || 1433,
+            port: type === 'mssql' ? (dbConfig.port || 1433) : dbConfig.port,
             database: dbConfig.database,
             user: dbConfig.user,
             password: dbConfig.password,
             isWritable: dbConfig.isWritable ?? false,
             description: dbConfig.description || msg.dbDescription.replace('{id}', dbId),
-            options: {
-                encrypt: dbConfig.options?.encrypt ?? true,
-                trustServerCertificate: dbConfig.options?.trustServerCertificate ?? true,
-                enableArithAbort: dbConfig.options?.enableArithAbort ?? true,
-                requestTimeout: dbConfig.options?.requestTimeout ?? 300000,
-                connectionTimeout: dbConfig.options?.connectionTimeout ?? 30000
-            }
+            options: type === 'mssql'
+                ? {
+                    encrypt: dbConfig.options?.encrypt ?? true,
+                    trustServerCertificate: dbConfig.options?.trustServerCertificate ?? true,
+                    enableArithAbort: dbConfig.options?.enableArithAbort ?? true,
+                    requestTimeout: dbConfig.options?.requestTimeout ?? 300000,
+                    connectionTimeout: dbConfig.options?.connectionTimeout ?? 30000
+                }
+                : (dbConfig.options || {})
         };
     }
 

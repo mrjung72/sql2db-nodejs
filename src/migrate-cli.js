@@ -230,7 +230,9 @@ const command = args[0];
 function parseOptions(args) {
     const options = {
         queryFilePath: null,
-        dryRun: false
+        dryRun: false,
+        sourceDb: null,
+        targetDb: null
     };
     
     for (let i = 0; i < args.length; i++) {
@@ -242,6 +244,14 @@ function parseOptions(args) {
                 break;
             case '--dry-run':
                 options.dryRun = true;
+                break;
+            case '--source-db':
+                options.sourceDb = args[i + 1];
+                i++;
+                break;
+            case '--target-db':
+                options.targetDb = args[i + 1];
+                i++;
                 break;
         }
     }
@@ -263,6 +273,11 @@ async function main() {
         
         const options = parseOptions(args.slice(1));
         console.log('--------------> options', options);
+        // Apply DB overrides via env when multi-db mode
+        if (process.env.MULTI_DB === 'true') {
+            if (options.sourceDb) process.env.SOURCE_DB_OVERRIDE = options.sourceDb;
+            if (options.targetDb) process.env.TARGET_DB_OVERRIDE = options.targetDb;
+        }
         
         // list-dbs 명령은 쿼리 파일이 필요하지 않음
         if (!options.queryFilePath && command !== 'list-dbs') {

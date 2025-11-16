@@ -1,5 +1,6 @@
 {
   "sampleDB": {
+    "type": "mssql",
     "user": "sample",
     "password": "sample1234!",
     "server": "localhost",
@@ -11,11 +12,12 @@
       "encrypt": true, 
       "trustServerCertificate": true,
       "enableArithAbort": true,
-      "requestTimeout": 300000,
-      "connectionTimeout": 30000
+      "requestTimeout": 3000,
+      "connectionTimeout": 3000
     }
   },
-  "targetDB": {
+  "mssqltoDB": {
+    "type": "mssql",
     "user": "sample",
     "password": "sample1234!",
     "server": "localhost",
@@ -27,11 +29,12 @@
       "encrypt": true, 
       "trustServerCertificate": true,
       "enableArithAbort": true,
-      "requestTimeout": 300000,
-      "connectionTimeout": 30000
+      "requestTimeout": 3000,
+      "connectionTimeout": 3000
     }
   },
-  "sourceDB": {
+  "mssqlfromDB": {
+    "type": "mssql",
     "user": "sample",
     "password": "sample1234!",
     "server": "localhost",
@@ -43,8 +46,8 @@
       "encrypt": true, 
       "trustServerCertificate": true,
       "enableArithAbort": true,
-      "requestTimeout": 300000,
-      "connectionTimeout": 30000
+      "requestTimeout": 3000,
+      "connectionTimeout": 3000
     }
   }
 } 

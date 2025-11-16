@@ -28,7 +28,7 @@ A Node.js-based solution for data migration between MSSQL databases with an inte
 - **query-processor**: Expands SELECT *, excludes IDENTITY columns, queries target schema.
 - **variable-manager**: Variable substitution, date/timezone functions, applies global column override values (including JSON mapping).
 - **script-processor**: Executes pre/post scripts with variable substitution.
-- **mssql-connection-manager**: Source/target DB connections, query execution, deletes/batching.
+- **connection-manager**: Multi-DB connection manager building per-DB adapters (MSSQL and future DBs), query execution, deletes/batching.
 - **mssql-data-migrator-modular**: Orchestrates migration, runs global/per-query processes, applies selective global overrides.
 
 ### Call Flow (Summary)

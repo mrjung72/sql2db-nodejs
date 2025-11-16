@@ -28,7 +28,7 @@
 - **query-processor**: SELECT * 자동 확장, IDENTITY 컬럼 제외, 타겟 스키마 조회.
 - **variable-manager**: 변수 치환, 날짜/타임존 함수, 전역 컬럼 오버라이드 값 적용(JSON 매핑 포함).
 - **script-processor**: 전/후처리 스크립트 실행과 변수 치환.
-- **mssql-connection-manager**: 소스/타겟 DB 연결, 쿼리 실행, 삭제/배치 작업.
+- **connection-manager**: 다중 DB용 연결 매니저로, DB별 어댑터(MSSQL 및 향후 타입)를 생성하고 쿼리 실행, 삭제/배치 작업을 처리.
 - **mssql-data-migrator-modular**: 전체 이관 오케스트레이션, 전역/개별 프로세스 실행, 선택적 전역 컬럼 오버라이드 적용.
 
 ### 호출 흐름(요약)
