@@ -24,7 +24,7 @@
   <!-- 전역 컬럼 오버라이드 설정 -->
   <globalColumnOverrides>
     <!-- 모든 쿼리에 공통으로 적용될 컬럼 값들 -->
-    <override column="payment_method">{"신용카드":"[신용카드]현대카드", "계좌이체":"[계좌이체]카카오뱅크"}</override>
+    <override column="payment_METHOD">{"신용카드":"[신용카드]현대카드", "계좌이체":"[계좌이체]카카오뱅크"}</override>
     <override column="company_code">{"COMPANY01":"APPLE", "COMPANY02":"AMAZON", "COMPANY03":"GOOGLE", "COMPANY04":"TESLA"}</override>
     <override column="product_code">{"LAPTOP001":"랩탑01", "WOMENS001":"우먼스01"}</override>
     <override column="email">{"david.brown@company.com":"david@gmail.com","emily.davis@company.com":"emily@gmail.com","robert.miller@company.com":"robert@gmail.com","lisa.garcia@company.com":"lisa@gmail.com"}</override>
@@ -47,7 +47,7 @@
                   deleteBeforeInsert="true">
         <![CDATA[
           SELECT *
-          FROM products 
+          FROM sql2db.products 
         ]]>
       </sourceQuery>
     </query>
@@ -59,10 +59,10 @@
       <sourceQuery targetTable="orders" 
                   targetColumns="*" 
                   identityColumns="order_number"
-                  applyGlobalColumns="all">
+                  applyGlobalColumns="*">
         <![CDATA[
           SELECT *
-          FROM orders 
+          FROM sql2db.orders 
         ]]>
       </sourceQuery>
 
@@ -80,7 +80,7 @@
                   applyGlobalColumns="created_date, last_NAME, company_code">
         <![CDATA[
           SELECT *
-          FROM users 
+          FROM sql2db.users 
  
         ]]>
       </sourceQuery>

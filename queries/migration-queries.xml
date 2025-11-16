@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<migration>
+<migration loggingLevel="info">
   <!-- 전역 기본 설정 -->
   <settings>
     <!-- 데이터베이스 연결 설정 (dbinfo.json 참조) -->
@@ -454,8 +454,8 @@
            description="감사 로그 이관"
            enabled="true">
       <sourceQuery targetTable="audit_logs" 
-                  targetColumns="log_id,action_type,entity_code,user_code,log_message,created_date" 
-                  identityColumns="log_id">
+                  targetColumns="*" 
+                  identityColumns="action_type,entity_code,user_code">
         <![CDATA[
           SELECT 
             log_id,
@@ -465,7 +465,6 @@
             log_message,
             created_date
           FROM sql2db.audit_logs 
-     
         ]]>
       </sourceQuery>
 
@@ -474,7 +473,7 @@
     <!-- 컬럼별 식별을 활용한 복합 쿼리 예시 -->
     <query id="migrate_complex_approval_relations"
            description="컬럼별 식별된 코드들을 사용한 복합 관계 데이터 이관"
-           enabled="false">
+           enabled="true">
       <sourceQuery targetTable="approval_relations" 
                   targetColumns="relation_id,approver_id,requester_id,product_code,relation_type,created_date" 
                   identityColumns="relation_id">

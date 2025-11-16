@@ -469,35 +469,15 @@ class MSSQLDataMigrator {
         
         switch (normalizedApplyGlobalColumns) {
             case 'all':
-                if (tableName) {
-                    const tableColumns = await this.queryProcessor.getTableColumns(tableName, database);
-                    // 대소문자 구분 없이 비교하기 위해 소문자로 변환 (객체/문자열 모두 지원)
-                    const tableColumnNames = tableColumns.map(col => typeof col === 'string' ? col : col.name);
-                    const tableColumnsLower = tableColumnNames.map(col => col.toLowerCase());
-                    const existingOverrides = {};
-                    
-                    globalColumnOverrides.forEach((value, column) => {
-                        const columnLower = column.toLowerCase();
-                        const matchIndex = tableColumnsLower.indexOf(columnLower);
-                        
-                        if (matchIndex !== -1) {
-                            // 테이블의 실제 컬럼명 사용
-                            const actualColumnName = tableColumnNames[matchIndex];
-                            // JSON 문자열은 그대로 유지 (실제 데이터 적용 시 매핑됨)
-                            existingOverrides[actualColumnName] = value;
-                        }
-                    });
-                    
-                    return existingOverrides;
-                } else {
-                    const allOverrides = {};
-                    globalColumnOverrides.forEach((value, column) => {
-                        // JSON 문자열은 그대로 유지 (실제 데이터 적용 시 매핑됨)
-                        allOverrides[column] = value;
-                    });
-                    
-                    return allOverrides;
-                }
+            case '*':
+                // 정의된 모든 전역 오버라이드를 그대로 적용
+                // (테이블 컬럼 존재 여부와 상관없이, 실제 적용 단계에서 필요한 컬럼만 사용됨)
+                const allOverrides = {};
+                globalColumnOverrides.forEach((value, column) => {
+                    // JSON 문자열은 그대로 유지 (실제 데이터 적용 시 매핑됨)
+                    allOverrides[column] = value;
+                });
+                return allOverrides;
                 
             case 'none':
                 return {};
@@ -604,8 +584,12 @@ class MSSQLDataMigrator {
                 if (selected && Object.keys(selected).length > 0) {
                     const selectedMap = new Map(Object.entries(selected));
                     processedData = this.variableManager.applyGlobalColumnOverrides(sourceData, selectedMap);
-                    const appliedCols = Object.keys(selected).join(', ');
-                    this.log(`${this.msg.globalColumnApplied} ${appliedCols}`);
+                    // 실제 데이터에 존재하는 컬럼만 로그에 표시
+                    const sampleRow = sourceData && sourceData.length > 0 ? sourceData[0] : {};
+                    const existingCols = new Set(Object.keys(sampleRow || {}));
+                    const appliedCols = Object.keys(selected).filter(col => existingCols.has(col));
+                    const appliedColsLabel = appliedCols.length > 0 ? appliedCols.join(', ') : Object.keys(selected).join(', ');
+                    this.log(`${this.msg.globalColumnApplied} ${appliedColsLabel}`);
                 } else if (queryConfig.sourceQueryApplyGlobalColumns) {
                     this.log(`${this.msg.globalColumnNotFound} ${queryConfig.sourceQueryApplyGlobalColumns} ${this.msg.globalColumnNotFoundEnd}`);
                 } else {
