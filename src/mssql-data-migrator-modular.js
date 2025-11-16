@@ -358,6 +358,13 @@ class MSSQLDataMigrator {
             
             // 변수 설정
             this.variableManager.setVariables(this.config.variables || {});
+
+            // XML 루트의 loggingLevel 설정 적용 (error/warn/info/debug/trace)
+            if (this.config.settings && this.config.settings.loggingLevel) {
+                const levelName = String(this.config.settings.loggingLevel).toUpperCase();
+                logger.setLogLevel(levelName);
+                logger.logLevelInfo();
+            }
             
             // DB 연결 정보 설정
             if (this.config.settings) {
@@ -570,7 +577,11 @@ class MSSQLDataMigrator {
                     const identityColumns = typeof queryConfig.identityColumns === 'string' && queryConfig.identityColumns.includes(',')
                         ? queryConfig.identityColumns.split(',').map(pk => pk.trim())
                         : queryConfig.identityColumns;
-                    await this.connectionManager.deleteFromTargetByPK(queryConfig.targetTable, identityColumns, sourceData);
+                    const deleteResult = await this.connectionManager.deleteFromTargetByPK(queryConfig.targetTable, identityColumns, sourceData);
+                    const deletedRows = deleteResult && deleteResult.rowsAffected && deleteResult.rowsAffected[0]
+                        ? deleteResult.rowsAffected[0]
+                        : 0;
+                    this.log(`삭제된 기존 데이터 건수: ${deletedRows}`);
                 }
             }
             

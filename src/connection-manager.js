@@ -1,4 +1,5 @@
 const { createAdapter } = require('./db/adapter-factory');
+const logger = require('./logger');
 
 class ConnectionManager {
   constructor(logger) {
@@ -96,6 +97,10 @@ class ConnectionManager {
   async queryDB(dbId, sqlText) {
     await this.connect(dbId);
     const adapter = this.getAdapter(dbId);
+    // DEBUG 레벨에서 실행 SQL 로그
+    if (logger && typeof logger.logQuery === 'function') {
+      logger.logQuery(dbId, sqlText);
+    }
     const res = await adapter.query(sqlText);
     // Normalize to recordset array when possible
     if (res && res.recordset) return res.recordset;
@@ -225,6 +230,11 @@ class ConnectionManager {
 
     const placeholders = effectiveColumns.map((_, idx) => `@param${idx}`).join(', ');
     const insertQuery = `INSERT INTO ${tableName} (${effectiveColumns.join(', ')}) VALUES (${placeholders})`;
+
+    // DEBUG 레벨에서 INSERT SQL 템플릿 로그
+    if (logger && typeof logger.logQuery === 'function') {
+      logger.logQuery(`${this.targetDbId || 'target'}.${tableName}`, insertQuery);
+    }
 
     let total = 0;
     for (const row of data) {

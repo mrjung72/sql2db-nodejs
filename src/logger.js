@@ -117,6 +117,21 @@ class Logger {
         return levelMap[envLogLevel.toUpperCase()] || 2; // 기본값: INFO
     }
     
+    setLogLevel(levelName) {
+        if (!levelName) return;
+        const normalized = String(levelName).toUpperCase();
+        const levelMap = {
+            ERROR: 0,
+            WARN: 1,
+            INFO: 2,
+            DEBUG: 3,
+            TRACE: 4
+        };
+        if (Object.prototype.hasOwnProperty.call(levelMap, normalized)) {
+            this.logLevel = levelMap[normalized];
+        }
+    }
+    
     shouldLog(level) {
         return level <= this.logLevel;
     }

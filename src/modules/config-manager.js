@@ -156,9 +156,18 @@ class ConfigManager {
                 queries: []
             };
             
+            // 루트 migration 엘리먼트의 속성 처리 (예: loggingLevel)
+            if (migration && migration.loggingLevel) {
+                config.settings.loggingLevel = String(migration.loggingLevel).toLowerCase();
+            }
+
             // 설정 파싱
             if (migration.settings) {
                 config.settings = this.parseSettings(migration.settings);
+                // settings 섹션 파싱 후에도 루트에서 온 loggingLevel을 보존
+                if (migration && migration.loggingLevel) {
+                    config.settings.loggingLevel = String(migration.loggingLevel).toLowerCase();
+                }
             }
             
             // 전역 변수 파싱
