@@ -3,7 +3,7 @@
     "user": "sample",
     "password": "sample1234!",
     "server": "localhost",
-    "database": "SampleDB",
+    "database": "sampleDB",
     "port": 1433,
     "isWritable": true,
     "description": "샘플 데이터베이스 (읽기/쓰기)",
