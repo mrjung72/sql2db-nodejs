@@ -121,34 +121,38 @@ class QueryProcessor {
             
             this.log(format(msg.columnQuery, { table: tableName, db: database }));
             
+            // SQL injection prevention: tableName is properly escaped
+            const escapedTableName = tableName.replace(/'/g, "''");
             const query = `
                 SELECT c.COLUMN_NAME 
                 FROM INFORMATION_SCHEMA.COLUMNS c
                 INNER JOIN sys.columns sc ON c.COLUMN_NAME = sc.name 
                     AND c.TABLE_NAME = OBJECT_NAME(sc.object_id)
-                WHERE c.TABLE_NAME = '${tableName}'
+                WHERE c.TABLE_NAME = '${escapedTableName}'
                     AND sc.is_computed = 0
                     AND sc.is_identity = 0
                     AND c.DATA_TYPE NOT IN ('varbinary', 'binary', 'image')
                 ORDER BY c.ORDINAL_POSITION
             `;
-            
+
             let result;
             if (database === 'source') {
                 result = await this.connectionManager.executeQueryOnSource(query);
             } else {
                 result = await this.connectionManager.executeQueryOnTarget(query);
-            }
-            
-            if (result && result.recordset) {
-                // 반환 형태를 { name: COLUMN_NAME } 객체 배열로 통일
-                const columns = result.recordset.map(row => ({ name: row.COLUMN_NAME }));
+            }    
+    
+            // 반환 형태를 { name: COLUMN_NAME } 객체 배열로 통일
+            if (result) {
+                let resultSet = result.recordset?result.recordset:result;
+                let columns = resultSet.map(row => ({ name: row.COLUMN_NAME }));
                 this.tableColumnCache[cacheKey] = columns;
                 this.log(format(msg.cacheSaved, { table: tableName, db: database, count: columns.length }));
                 return columns;
-            }
+            }            
             
             return [];
+
         } catch (error) {
             this.log(format(msg.columnQueryFailed, { table: tableName, error: error.message }));
             return [];
