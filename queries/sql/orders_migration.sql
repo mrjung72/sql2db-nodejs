@@ -1,3 +1,3 @@
           SELECT *
-          FROM sql2db.orders 
+          FROM orders 
           WHERE order_date >= '${startDate}' AND order_date <= '${endDate}'

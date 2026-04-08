@@ -47,7 +47,7 @@
                   deleteBeforeInsert="true">
         <![CDATA[
           SELECT *
-          FROM sql2db.products 
+          FROM products 
         ]]>
       </sourceQuery>
     </query>
@@ -62,7 +62,7 @@
                   applyGlobalColumns="*">
         <![CDATA[
           SELECT *
-          FROM sql2db.orders 
+          FROM orders 
         ]]>
       </sourceQuery>
 
@@ -80,7 +80,7 @@
                   applyGlobalColumns="created_date, last_NAME, company_code">
         <![CDATA[
           SELECT *
-          FROM sql2db.users 
+          FROM users 
  
         ]]>
       </sourceQuery>

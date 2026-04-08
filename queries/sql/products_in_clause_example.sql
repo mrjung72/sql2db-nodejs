@@ -1,3 +1,3 @@
 SELECT *
-FROM sql2db.products 
+FROM products 
 WHERE status IN (${statusList}) 

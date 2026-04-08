@@ -61,7 +61,7 @@
         ]]>
       </group>
 
-      <group id="add_code_datas_for_test" description="테스트를 위한 코드데이터 추가" enabled="true">
+      <group id="add_code_datas_for_test" description="테스트를 위한 코드데이터 추가" enabled="false">
         <![CDATA[
             INSERT INTO companies (company_code, company_name, address, phone, email, status) 
             VALUES
@@ -113,7 +113,7 @@
                 columnName="user_id"
                 enabled="true">
       <![CDATA[
-        SELECT user_id FROM sql2db.users 
+        SELECT user_id FROM users 
         WHERE status = 'ACTIVE' 
           AND user_id IS NOT NULL
         ORDER BY user_id
@@ -127,7 +127,7 @@
                 extractType="key_value_pairs"
                 enabled="true">
       <![CDATA[
-        SELECT company_code, company_name FROM sql2db.companies WHERE status = 'ACTIVE'
+        SELECT company_code, company_name FROM companies WHERE status = 'ACTIVE'
       ]]>
     </dynamicVar>
 
@@ -138,7 +138,7 @@
                 enabled="true">
       <![CDATA[
         SELECT DISTINCT department_code, department_name 
-        FROM sql2db.departments 
+        FROM departments 
         WHERE is_active = 1
  
       ]]>
@@ -151,7 +151,7 @@
                 enabled="true">
       <![CDATA[
         SELECT status_code, status_description 
-        FROM sql2db.status_codes 
+        FROM status_codes 
         WHERE category = 'USER_STATUS'
 
       ]]>
@@ -164,19 +164,8 @@
                 enabled="true">
       <![CDATA[
         SELECT category_id, category_name 
-        FROM sql2db.categories 
+        FROM categories 
         WHERE is_active = 1 
-      ]]>
-    </dynamicVar>
-
-    <dynamicVar id="extract_max_order_id"
-                description="최대 주문 ID 추출"
-                variableName="maxOrderId"
-                extractType="single_value"
-                database="sampleDB"
-                enabled="true">
-      <![CDATA[
-        SELECT MAX(OrderID) as max_id FROM orders
       ]]>
     </dynamicVar>
 
@@ -187,7 +176,7 @@
                 columns="product_code,category_id"
                 enabled="true">
       <![CDATA[
-        SELECT product_code, category_id FROM sql2db.products
+        SELECT product_code, category_id FROM products
       ]]>
     </dynamicVar>
 
@@ -203,7 +192,7 @@
           u.user_id,
           u.department_id,
           d.manager_id
-        FROM sql2db.users u
+        FROM users u
         LEFT JOIN departments d ON u.department_id = d.department_id
         WHERE u.status IN (${statusList})
           AND u.created_date >= '${startDate}'
@@ -224,7 +213,7 @@
           ar.approver_code,
           ar.requester_code,
           ar.product_code
-        FROM sql2db.approval_requests ar
+        FROM approval_requests ar
         WHERE ar.status IN (${statusList})
           AND ar.requested_date >= '${startDate}'
           AND ar.approver_code IS NOT NULL
@@ -247,7 +236,7 @@
                   deleteBeforeInsert="true">
         <![CDATA[
           SELECT *
-          FROM sql2db.categories 
+          FROM categories 
         ]]>
       </sourceQuery>
     </query>
@@ -263,7 +252,7 @@
                   deleteBeforeInsert="true">
         <![CDATA[
           SELECT *
-          FROM sql2db.departments 
+          FROM departments 
         ]]>
       </sourceQuery>
     </query>
@@ -279,7 +268,7 @@
                   deleteBeforeInsert="true">
         <![CDATA[
           SELECT *
-          FROM sql2db.companies 
+          FROM companies 
         ]]>
       </sourceQuery>
     </query>
@@ -296,7 +285,7 @@
                   applyGlobalColumns="created_date">
         <![CDATA[
           SELECT *
-          FROM sql2db.users 
+          FROM users 
  
         ]]>
       </sourceQuery>
@@ -313,7 +302,7 @@
                   deleteBeforeInsert="true">
         <![CDATA[
           SELECT *
-          FROM sql2db.products 
+          FROM products 
         ]]>
       </sourceQuery>
     </query>
@@ -339,7 +328,7 @@
                   applyGlobalColumns="data_version">
         <![CDATA[
           SELECT *
-          FROM sql2db.products 
+          FROM products 
           WHERE status IN (${statusList}) 
     
         ]]>
@@ -357,7 +346,7 @@
                   applyGlobalColumns="all">
         <![CDATA[
           SELECT *
-          FROM sql2db.employees 
+          FROM employees 
           WHERE department_code IN (${departmentCodes}) 
             AND hire_date >= '${startDate}' 
         
@@ -388,7 +377,7 @@
                   deleteBeforeInsert="true">
         <![CDATA[
           SELECT *
-          FROM sql2db.customers 
+          FROM customers 
         ]]>
       </sourceQuery>
     </query>
@@ -404,7 +393,7 @@
                   applyGlobalColumns="all">
         <![CDATA[
           SELECT *
-          FROM sql2db.orders 
+          FROM orders 
         ]]>
       </sourceQuery>
 
@@ -419,7 +408,7 @@
                   identityColumns="product_code,customer_id">
         <![CDATA[
           SELECT * 
-          FROM sql2db.product_reviews 
+          FROM product_reviews 
           WHERE product_code IN (${categoryProductIds.product_code}) 
             AND rating >= 4
         ]]>
@@ -441,7 +430,7 @@
             related_entity_id,
             relation_type,
             created_date
-          FROM sql2db.entity_relationships 
+          FROM entity_relationships 
           WHERE entity_id IN (${allEntityIds})
              OR related_entity_id IN (${allEntityIds})
           
@@ -464,7 +453,7 @@
             user_code,
             log_message,
             created_date
-          FROM sql2db.audit_logs 
+          FROM audit_logs 
         ]]>
       </sourceQuery>
 
@@ -485,7 +474,7 @@
             ar.product_code,
             ar.relation_type,
             ar.created_date
-          FROM sql2db.approval_relations ar
+          FROM approval_relations ar
           WHERE ar.approver_id IN (${approvalCodesById.approver_code})
             AND ar.requester_id IN (${approvalCodesById.requester_code})
             AND ar.product_code IN (${approvalCodesById.product_code})
@@ -498,7 +487,7 @@
             ar2.product_code,
             ar2.relation_type,
             ar2.created_date
-          FROM sql2db.approval_relations ar2
+          FROM approval_relations ar2
           WHERE (ar2.approver_id IN (${approvalCodesById}) 
              OR ar2.requester_id IN (${approvalCodesById}))
             AND ar2.created_date >= '${startDate}'
@@ -529,7 +518,7 @@
               ELSE 'Unknown Company'
             END as company_name,
             u.created_date
-          FROM sql2db.users u
+          FROM users u
           WHERE u.company_code IN (${companyMapping})
             AND u.created_date >= '${startDate}'
 
@@ -550,12 +539,12 @@
             e.emp_name,
             e.dept_code,
             -- 부서명 매핑
-            COALESCE(${departmentMapping.${e.dept_code}}, 'Unknown Department') as dept_name,
+            COALESCE(${departmentMapping}.${e.dept_code}, 'Unknown Department') as dept_name,
             e.status,
             -- 상태 설명 매핑  
             COALESCE(${statusMapping.${e.status}}, 'Unknown Status') as status_desc,
             e.hire_date
-          FROM sql2db.employees e
+          FROM employees e
           WHERE e.dept_code IN (${departmentMapping})
             AND e.status IN (${statusMapping})
             AND e.hire_date >= '${startDate}'
@@ -577,7 +566,7 @@
                   deleteBeforeInsert="true">
         <![CDATA[
           SELECT *
-          FROM sql2db.activity_logs 
+          FROM activity_logs 
         ]]>
       </sourceQuery>
     </query>
