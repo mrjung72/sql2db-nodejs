@@ -343,6 +343,7 @@
            enabled="false">
       <sourceQuery targetTable="products" 
                   targetColumns="*" 
+                  isCreateTable="true"
                   identityColumns="product_code" 
                   applyGlobalColumns="data_version">
         <![CDATA[

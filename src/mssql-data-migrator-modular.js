@@ -1053,7 +1053,7 @@ class MSSQLDataMigrator {
                 'targetTable', 'targetColumns', 'identityColumns', 'batchSize',
                 'deleteBeforeInsert', 'sourceQueryDeleteBeforeInsert', 
                 'sourceQueryApplyGlobalColumns', 'applyGlobalColumns',
-                'preProcess', 'postProcess', 'columnOverrides'
+                'preProcess', 'postProcess', 'columnOverrides', 'isCreateTable'
             ];
             
             const validDynamicVarAttributes = [

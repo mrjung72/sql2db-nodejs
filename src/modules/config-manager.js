@@ -372,13 +372,13 @@ class ConfigManager {
         const validQueryXmlAttrs = [
             'id', 'description', 'enabled', 'batchSize', 'deleteBeforeInsert',
             'sourceQuery', 'sourceQueryFile', 'targetTable', 'targetColumns', 
-            'identityColumns', 'preProcess', 'postProcess'
+            'identityColumns', 'preProcess', 'postProcess', 'isCreateTable'
         ];
         
         // 허용되는 sourceQuery 요소 속성
         const validSourceQueryXmlAttrs = [
             'targetTable', 'targetColumns', 'identityColumns', 'sourceQueryFile',
-            'applyGlobalColumns', 'deleteBeforeInsert', '_' // _ 는 CDATA 내용
+            'applyGlobalColumns', 'deleteBeforeInsert', 'isCreateTable', '_' // _ 는 CDATA 내용
         ];
         
         // 허용되는 preProcess/postProcess 요소 속성
@@ -412,6 +412,7 @@ class ConfigManager {
                 query.sourceQueryDeleteBeforeInsert = q.deleteBeforeInsert !== undefined 
                     ? (q.deleteBeforeInsert === 'true') 
                     : settings.deleteBeforeInsert;
+                query.isCreateTable = q.isCreateTable === 'true';
                 query.targetTable = q.targetTable;
                 query.targetColumns = q.targetColumns ? q.targetColumns.split(',').map(c => c.trim()) : [];
                 query.identityColumns = q.identityColumns;
@@ -432,6 +433,7 @@ class ConfigManager {
                     query.sourceQueryDeleteBeforeInsert = q.sourceQuery.deleteBeforeInsert !== undefined
                         ? (q.sourceQuery.deleteBeforeInsert === 'true')
                         : settings.deleteBeforeInsert;
+                    query.isCreateTable = q.sourceQuery.isCreateTable === 'true';
                     query.targetTable = q.sourceQuery.targetTable;
                     query.targetColumns = q.sourceQuery.targetColumns 
                         ? q.sourceQuery.targetColumns.split(',').map(c => c.trim()) 
@@ -444,6 +446,7 @@ class ConfigManager {
                     query.sourceQueryDeleteBeforeInsert = q.deleteBeforeInsert !== undefined
                         ? (q.deleteBeforeInsert === 'true')
                         : settings.deleteBeforeInsert;
+                    query.isCreateTable = q.isCreateTable === 'true';
                     query.targetTable = q.targetTable;
                     query.targetColumns = q.targetColumns ? q.targetColumns.split(',').map(c => c.trim()) : [];
                     query.identityColumns = q.identityColumns;

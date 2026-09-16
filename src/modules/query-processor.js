@@ -284,7 +284,13 @@ class QueryProcessor {
             } else {
                 throw new Error(msg.sourceQueryRequired);
             }
-            
+
+            // isCreateTable 설정 시 대상 테이블이 없으면 소스 쿼리 메타데이터로 생성
+            if (queryConfig.isCreateTable) {
+                this.log(`isCreateTable=true: target table '${queryConfig.targetTable}' will be created from source query metadata if it does not exist.`);
+                await this.connectionManager.createTargetTableFromSourceQuery(queryConfig.targetTable, queryConfig.sourceQuery);
+            }
+
             // SELECT * 패턴 감지 및 처리
             const selectAllPattern = /SELECT\s+\*\s+FROM\s+(\w+)(?:\s+(?:AS\s+)?(?!WHERE|GROUP|HAVING|ORDER|LIMIT|OFFSET|UNION|INTERSECT|EXCEPT|FOR|OPTION|WITH\b)(\w+))?(?:\s+(?:WHERE|GROUP|HAVING|ORDER|LIMIT|OFFSET|UNION|INTERSECT|EXCEPT|FOR|OPTION|WITH)|\s*$)/i;
             const match = queryConfig.sourceQuery.match(selectAllPattern);

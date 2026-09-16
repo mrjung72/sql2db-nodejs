@@ -724,6 +724,193 @@ class MSSQLConnectionManager {
         }
     }
 
+    // Generate SQL Server data type declaration string from column metadata
+    getSqlTypeDeclaration(column) {
+        const dataType = (column.dataType || '').toLowerCase();
+        const maxLength = column.maxLength;
+        const precision = column.precision;
+        const scale = column.scale == null ? 0 : column.scale;
+
+        switch (dataType) {
+            case 'bigint': return 'BIGINT';
+            case 'int': return 'INT';
+            case 'smallint': return 'SMALLINT';
+            case 'tinyint': return 'TINYINT';
+            case 'bit': return 'BIT';
+            case 'float': return 'FLOAT';
+            case 'real': return 'REAL';
+            case 'decimal':
+            case 'dec':
+                return `DECIMAL(${precision || 18}, ${scale})`;
+            case 'numeric':
+                return `NUMERIC(${precision || 18}, ${scale})`;
+            case 'money': return 'MONEY';
+            case 'smallmoney': return 'SMALLMONEY';
+            case 'varchar':
+                return `VARCHAR(${(maxLength === -1 || maxLength == null) ? 'MAX' : maxLength})`;
+            case 'nvarchar':
+                return `NVARCHAR(${(maxLength === -1 || maxLength == null) ? 'MAX' : maxLength})`;
+            case 'char':
+                return `CHAR(${maxLength || 1})`;
+            case 'nchar':
+                return `NCHAR(${maxLength || 1})`;
+            case 'text': return 'TEXT';
+            case 'ntext': return 'NTEXT';
+            case 'datetime': return 'DATETIME';
+            case 'datetime2':
+                return `DATETIME2(${scale == null ? 7 : scale})`;
+            case 'smalldatetime': return 'SMALLDATETIME';
+            case 'date': return 'DATE';
+            case 'time':
+                return `TIME(${scale == null ? 7 : scale})`;
+            case 'datetimeoffset':
+                return `DATETIMEOFFSET(${scale == null ? 7 : scale})`;
+            case 'uniqueidentifier': return 'UNIQUEIDENTIFIER';
+            case 'xml': return 'XML';
+            case 'varbinary':
+                return `VARBINARY(${(maxLength === -1 || maxLength == null) ? 'MAX' : maxLength})`;
+            case 'binary':
+                return `BINARY(${maxLength || 1})`;
+            case 'image': return 'IMAGE';
+            case 'geography': return 'GEOGRAPHY';
+            case 'geometry': return 'GEOMETRY';
+            case 'hierarchyid':
+            case 'udt':
+                return dataType.toUpperCase();
+            case 'timestamp':
+            case 'rowversion':
+                return 'ROWVERSION';
+            case 'sql_variant': return 'SQL_VARIANT';
+            default:
+                console.warn(`Unknown SQL type '${column.dataType}' for column '${column.name}', falling back to NVARCHAR(MAX).`);
+                return 'NVARCHAR(MAX)';
+        }
+    }
+
+    // Extract source table name from a simple SELECT query
+    getSourceTableNameFromQuery(query) {
+        if (!query || typeof query !== 'string') return null;
+        const match = query.match(/\bFROM\s+([\w\[\]\.]+)/i);
+        if (!match) return null;
+        return match[1].replace(/[\[\]]/g, '');
+    }
+
+    // Get source table column metadata from INFORMATION_SCHEMA
+    async getSourceTableColumnsFromInformationSchema(sourceTableName) {
+        if (!this.isSourceConnected) {
+            await this.connectSource();
+        }
+
+        const parts = sourceTableName.split('.');
+        const schema = parts.length > 1 ? parts[0] : null;
+        const name = parts.length > 1 ? parts[1] : parts[0];
+
+        const query = `
+            SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, NUMERIC_PRECISION, NUMERIC_SCALE, IS_NULLABLE
+            FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_NAME = @tableName
+              AND (@schema IS NULL OR TABLE_SCHEMA = @schema)
+            ORDER BY ORDINAL_POSITION
+        `;
+
+        const request = this.sourcePool.request();
+        request.input('tableName', sql.NVarChar(128), name);
+        request.input('schema', sql.NVarChar(128), schema);
+
+        const result = await request.query(query);
+        return (result.recordset || []).map(row => ({
+            name: row.COLUMN_NAME,
+            dataType: row.DATA_TYPE,
+            maxLength: row.CHARACTER_MAXIMUM_LENGTH,
+            precision: row.NUMERIC_PRECISION,
+            scale: row.NUMERIC_SCALE,
+            isNullable: row.IS_NULLABLE === 'YES'
+        }));
+    }
+
+    // Create target table from source query metadata if it does not exist
+    async createTargetTableFromSourceQuery(targetTable, sourceQuery) {
+        try {
+            if (!this.isSourceConnected) {
+                await this.connectSource();
+            }
+            if (!this.isTargetConnected) {
+                await this.connectTarget();
+            }
+
+            let parsed;
+            try {
+                parsed = sql.Table.parseName(targetTable);
+            } catch (parseErr) {
+                parsed = { name: targetTable, schema: null };
+            }
+            const fullName = parsed.schema
+                ? `[${parsed.schema}].[${parsed.name}]`
+                : `[${parsed.name}]`;
+
+            // Try sys.dm_exec_describe_first_result_set first
+            let columns = [];
+            try {
+                const describeQuery = `
+                    SELECT name, system_type_name, is_nullable
+                    FROM sys.dm_exec_describe_first_result_set(@sourceQuery, NULL, 0)
+                    WHERE error_number IS NULL
+                    ORDER BY column_ordinal
+                `;
+                const request = this.sourcePool.request();
+                request.input('sourceQuery', sql.NVarChar(sql.MAX), sourceQuery);
+                const result = await request.query(describeQuery);
+
+                if (result.recordset && result.recordset.length > 0) {
+                    columns = result.recordset.map(row => ({
+                        name: row.name,
+                        typeDeclaration: row.system_type_name,
+                        isNullable: row.is_nullable === true || row.is_nullable === 1
+                    }));
+                }
+            } catch (dmfErr) {
+                console.warn(`sys.dm_exec_describe_first_result_set failed: ${dmfErr.message}`);
+            }
+
+            // Fallback: read source table schema from INFORMATION_SCHEMA
+            if (columns.length === 0) {
+                const sourceTableName = this.getSourceTableNameFromQuery(sourceQuery);
+                if (!sourceTableName) {
+                    throw new Error(`Could not determine source table name for isCreateTable from query: ${sourceQuery}`);
+                }
+                const sourceColumns = await this.getSourceTableColumnsFromInformationSchema(sourceTableName);
+                if (sourceColumns.length === 0) {
+                    throw new Error(`Could not retrieve column metadata for source table: ${sourceTableName}`);
+                }
+                columns = sourceColumns.map(col => ({
+                    name: col.name,
+                    typeDeclaration: this.getSqlTypeDeclaration(col),
+                    isNullable: col.isNullable
+                }));
+            }
+
+            const columnDefinitions = columns.map(col =>
+                `[${col.name}] ${col.typeDeclaration} ${col.isNullable ? 'NULL' : 'NOT NULL'}`
+            ).join(',\n    ');
+
+            const createQuery = `
+                IF OBJECT_ID('${fullName}', 'U') IS NULL
+                BEGIN
+                    CREATE TABLE ${fullName} (
+                        ${columnDefinitions}
+                    )
+                END
+            `;
+
+            const targetRequest = this.targetPool.request();
+            await targetRequest.query(createQuery);
+            console.log(`Target table '${fullName}' created (or already exists) for data migration.`);
+        } catch (error) {
+            console.error(`Failed to create target table '${targetTable}': ${error.message}`);
+            throw new Error(`Failed to create target table '${targetTable}': ${error.message}`);
+        }
+    }
+
     // Insert data into target database using bulk insert
     async insertToTarget(tableName, columns, data) {
         try {
