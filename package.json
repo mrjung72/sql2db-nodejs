@@ -1,6 +1,6 @@
 {
   "name": "sql2db",
-  "version": "0.10.1",
+  "version": "0.10.2",
   "description": "MSSQL 데이터베이스 간 데이터 이관 도구",
   "main": "app.js",
   "scripts": {
@@ -47,6 +47,6 @@
     "xml2js": "^0.6.2"
   },
   "devDependencies": {
-    "pkg": "^5.8.1"
+    "@yao-pkg/pkg": "^5.11.5"
   }
 }
