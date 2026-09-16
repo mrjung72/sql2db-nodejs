@@ -272,6 +272,9 @@ class MSSQLConnectionManager {
         this.dbConnections = {}; // Connection status storage for each DB
         this.dbConfigs = null; // dbinfo.json configuration
 
+        // Cache for table column type information used by bulk insert
+        this.tableColumnTypeCache = {};
+
         // Initialize helpers
         this.metadataCache = new MetadataCache({
             getPool: (isSource) => (isSource ? this.sourcePool : this.targetPool),
@@ -609,7 +612,119 @@ class MSSQLConnectionManager {
         }
     }
 
-    // Insert data into target database
+    // Get target table column metadata including data types for bulk insert
+    async getTargetTableColumnTypes(tableName) {
+        if (this.tableColumnTypeCache[tableName]) {
+            return this.tableColumnTypeCache[tableName];
+        }
+
+        if (!this.isTargetConnected) {
+            await this.connectTarget();
+        }
+
+        let parsed = { name: tableName, schema: null };
+        try {
+            parsed = sql.Table.parseName(tableName);
+        } catch (parseErr) {
+            // If the table name cannot be parsed, use it as-is and rely on the query
+        }
+
+        const request = this.targetPool.request();
+        request.input('tableName', sql.NVarChar(128), parsed.name);
+        request.input('schema', sql.NVarChar(128), parsed.schema);
+
+        const query = `
+            SELECT
+                c.COLUMN_NAME AS name,
+                c.DATA_TYPE AS dataType,
+                c.IS_NULLABLE AS isNullable,
+                c.CHARACTER_MAXIMUM_LENGTH AS maxLength,
+                c.NUMERIC_PRECISION AS precision,
+                c.NUMERIC_SCALE AS scale
+            FROM INFORMATION_SCHEMA.COLUMNS c
+            WHERE c.TABLE_NAME = @tableName
+              AND (@schema IS NULL OR c.TABLE_SCHEMA = @schema)
+            ORDER BY c.ORDINAL_POSITION
+        `;
+
+        const result = await request.query(query);
+        const columns = result.recordset.map(row => ({
+            name: row.name,
+            dataType: row.dataType,
+            isNullable: row.isNullable === 'YES',
+            maxLength: row.maxLength,
+            precision: row.precision,
+            scale: row.scale
+        }));
+
+        this.tableColumnTypeCache[tableName] = columns;
+        return columns;
+    }
+
+    // Map SQL Server data type to mssql type object for bulk insert
+    mssqlTypeForColumn(column) {
+        const type = (column.dataType || '').toLowerCase();
+        const maxLength = column.maxLength;
+        const precision = column.precision;
+        const scale = column.scale == null ? 0 : column.scale;
+
+        switch (type) {
+            case 'bigint': return sql.BigInt;
+            case 'int': return sql.Int;
+            case 'smallint': return sql.SmallInt;
+            case 'tinyint': return sql.TinyInt;
+            case 'bit': return sql.Bit;
+            case 'float': return sql.Float;
+            case 'real': return sql.Real;
+            case 'decimal':
+            case 'dec':
+                return sql.Decimal(precision || 18, scale);
+            case 'numeric':
+                return sql.Numeric(precision || 18, scale);
+            case 'money': return sql.Money;
+            case 'smallmoney': return sql.SmallMoney;
+            case 'varchar':
+                return sql.VarChar((maxLength === -1 || maxLength == null) ? sql.MAX : maxLength);
+            case 'nvarchar':
+                return sql.NVarChar((maxLength === -1 || maxLength == null) ? sql.MAX : maxLength);
+            case 'char':
+                return sql.Char(maxLength || 1);
+            case 'nchar':
+                return sql.NChar(maxLength || 1);
+            case 'text': return sql.Text;
+            case 'ntext': return sql.NText;
+            case 'datetime': return sql.DateTime;
+            case 'datetime2':
+                return sql.DateTime2(scale);
+            case 'smalldatetime': return sql.SmallDateTime;
+            case 'date': return sql.Date;
+            case 'time':
+                return sql.Time(scale);
+            case 'datetimeoffset':
+                return sql.DateTimeOffset(scale);
+            case 'uniqueidentifier': return sql.UniqueIdentifier;
+            case 'xml': return sql.Xml;
+            case 'varbinary':
+                return sql.VarBinary((maxLength === -1 || maxLength == null) ? sql.MAX : maxLength);
+            case 'binary':
+                return sql.Binary(maxLength || 1);
+            case 'image': return sql.Image;
+            case 'geography': return sql.Geography;
+            case 'geometry': return sql.Geometry;
+            case 'hierarchyid':
+            case 'udt':
+                return sql.UDT;
+            case 'timestamp':
+            case 'rowversion':
+                return sql.VarBinary(8);
+            case 'sql_variant': return sql.Variant;
+            default:
+                console.warn(`Unknown SQL type '${column.dataType}' for column '${column.name}', falling back to NVarChar(MAX).`);
+                return sql.NVarChar(sql.MAX);
+        }
+    }
+
+    // Insert data into target database using bulk insert
     async insertToTarget(tableName, columns, data) {
         try {
             if (!this.isTargetConnected) {
@@ -621,27 +736,37 @@ class MSSQLConnectionManager {
                 return { rowsAffected: [0] };
             }
 
-            const request = this.targetPool.request();
-            const placeholders = columns.map((_, index) => `@param${index}`).join(', ');
-            const insertQuery = `INSERT INTO ${tableName} (${columns.join(', ')}) VALUES (${placeholders})`;
-
-            let totalRowsAffected = 0;
-
-            for (const row of data) {
-                columns.forEach((column, index) => {
-                    request.input(`param${index}`, row[column]);
-                });
-
-                const result = await request.query(insertQuery);
-                totalRowsAffected += result.rowsAffected[0];
-
-                request.parameters = {};
+            const columnTypes = await this.getTargetTableColumnTypes(tableName);
+            const typeMap = new Map();
+            for (const col of columnTypes) {
+                typeMap.set(col.name.toLowerCase(), col);
             }
 
-            return { rowsAffected: [totalRowsAffected] };
+            const table = new sql.Table(tableName);
+            for (const column of columns) {
+                const meta = typeMap.get(column.toLowerCase());
+                if (!meta) {
+                    throw new Error(`Column '${column}' not found in target table '${tableName}' metadata.`);
+                }
+                table.columns.add(column, this.mssqlTypeForColumn(meta), { nullable: meta.isNullable });
+            }
+
+            for (const row of data) {
+                const values = columns.map(column => (row[column] === undefined ? null : row[column]));
+                table.rows.add(...values);
+            }
+
+            const request = this.targetPool.request();
+            const result = await request.bulk(table);
+            const rowCount = typeof result.rowsAffected === 'number'
+                ? result.rowsAffected
+                : (result.rowsAffected && result.rowsAffected[0] ? result.rowsAffected[0] : 0);
+
+            console.log(format(msg.insertSuccess, { table: tableName, count: rowCount }));
+            return { rowsAffected: [rowCount] };
         } catch (error) {
-            console.error(format(msg.targetInsertFailed, { message: error.message }));
-            throw new Error(format(msg.targetInsertFailed, { message: error.message }));
+            console.error(format(msg.insertFailed, { message: error.message }));
+            throw new Error(format(msg.insertFailed, { message: error.message }));
         }
     }
 
@@ -651,6 +776,8 @@ class MSSQLConnectionManager {
         this.metadataCache.clear();
         // Keep local field in sync for any legacy access
         this.tableColumnCache = {};
+        // Clear bulk insert type cache
+        this.tableColumnTypeCache = {};
     }
 
     // Get table column cache statistics
