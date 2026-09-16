@@ -1050,7 +1050,7 @@ class MSSQLDataMigrator {
             // 허용되는 속성명 정의
             const validQueryAttributes = [
                 'id', 'description', 'enabled', 'sourceQuery', 'sourceQueryFile', 
-                'targetTable', 'targetColumns', 'identityColumns', 'batchSize',
+                'targetTable', 'targetSchema', 'targetColumns', 'identityColumns', 'batchSize',
                 'deleteBeforeInsert', 'sourceQueryDeleteBeforeInsert', 
                 'sourceQueryApplyGlobalColumns', 'applyGlobalColumns',
                 'preProcess', 'postProcess', 'columnOverrides', 'isCreateTable'
@@ -1062,7 +1062,7 @@ class MSSQLDataMigrator {
             ];
             
             const validSettingsAttributes = [
-                'sourceDatabase', 'targetDatabase', 'batchSize', 'deleteBeforeInsert'
+                'sourceDatabase', 'targetDatabase', 'batchSize', 'deleteBeforeInsert', 'isCreateTable'
             ];
             
             const validPrePostProcessAttributes = [

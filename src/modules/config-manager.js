@@ -215,6 +215,9 @@ class ConfigManager {
         if (settingsXml.deleteBeforeInsert) {
             settings.deleteBeforeInsert = settingsXml.deleteBeforeInsert === 'true';
         }
+        if (settingsXml.isCreateTable) {
+            settings.isCreateTable = settingsXml.isCreateTable === 'true';
+        }
         
         return settings;
     }
@@ -371,13 +374,13 @@ class ConfigManager {
         // 허용되는 query 요소 속성
         const validQueryXmlAttrs = [
             'id', 'description', 'enabled', 'batchSize', 'deleteBeforeInsert',
-            'sourceQuery', 'sourceQueryFile', 'targetTable', 'targetColumns', 
+            'sourceQuery', 'sourceQueryFile', 'targetTable', 'targetSchema', 'targetColumns', 
             'identityColumns', 'preProcess', 'postProcess', 'isCreateTable'
         ];
         
         // 허용되는 sourceQuery 요소 속성
         const validSourceQueryXmlAttrs = [
-            'targetTable', 'targetColumns', 'identityColumns', 'sourceQueryFile',
+            'targetTable', 'targetSchema', 'targetColumns', 'identityColumns', 'sourceQueryFile',
             'applyGlobalColumns', 'deleteBeforeInsert', 'isCreateTable', '_' // _ 는 CDATA 내용
         ];
         
@@ -412,8 +415,12 @@ class ConfigManager {
                 query.sourceQueryDeleteBeforeInsert = q.deleteBeforeInsert !== undefined 
                     ? (q.deleteBeforeInsert === 'true') 
                     : settings.deleteBeforeInsert;
-                query.isCreateTable = q.isCreateTable === 'true';
-                query.targetTable = q.targetTable;
+                query.isCreateTable = q.isCreateTable !== undefined
+                    ? (q.isCreateTable === 'true')
+                    : (settings.isCreateTable || false);
+                query.targetSchema = q.targetSchema;
+                const targetTable = q.targetTable;
+                query.targetTable = query.targetSchema ? `${query.targetSchema}.${targetTable}` : targetTable;
                 query.targetColumns = q.targetColumns ? q.targetColumns.split(',').map(c => c.trim()) : [];
                 query.identityColumns = q.identityColumns;
             } else if (q.sourceQuery) {
@@ -433,8 +440,12 @@ class ConfigManager {
                     query.sourceQueryDeleteBeforeInsert = q.sourceQuery.deleteBeforeInsert !== undefined
                         ? (q.sourceQuery.deleteBeforeInsert === 'true')
                         : settings.deleteBeforeInsert;
-                    query.isCreateTable = q.sourceQuery.isCreateTable === 'true';
-                    query.targetTable = q.sourceQuery.targetTable;
+                    query.isCreateTable = q.sourceQuery.isCreateTable !== undefined
+                        ? (q.sourceQuery.isCreateTable === 'true')
+                        : (settings.isCreateTable || false);
+                    query.targetSchema = q.sourceQuery.targetSchema;
+                    const sqTargetTable = q.sourceQuery.targetTable;
+                    query.targetTable = query.targetSchema ? `${query.targetSchema}.${sqTargetTable}` : sqTargetTable;
                     query.targetColumns = q.sourceQuery.targetColumns 
                         ? q.sourceQuery.targetColumns.split(',').map(c => c.trim()) 
                         : [];
@@ -446,8 +457,12 @@ class ConfigManager {
                     query.sourceQueryDeleteBeforeInsert = q.deleteBeforeInsert !== undefined
                         ? (q.deleteBeforeInsert === 'true')
                         : settings.deleteBeforeInsert;
-                    query.isCreateTable = q.isCreateTable === 'true';
-                    query.targetTable = q.targetTable;
+                    query.isCreateTable = q.isCreateTable !== undefined
+                        ? (q.isCreateTable === 'true')
+                        : (settings.isCreateTable || false);
+                    query.targetSchema = q.targetSchema;
+                    const qTargetTable = q.targetTable;
+                    query.targetTable = query.targetSchema ? `${query.targetSchema}.${qTargetTable}` : qTargetTable;
                     query.targetColumns = q.targetColumns ? q.targetColumns.split(',').map(c => c.trim()) : [];
                     query.identityColumns = q.identityColumns;
                     query.sourceQuery = q.sourceQuery.trim();

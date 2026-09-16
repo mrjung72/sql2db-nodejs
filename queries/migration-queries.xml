@@ -8,6 +8,7 @@
     <!-- 이관 기본 설정 -->
     <batchSize>${batchSize}</batchSize>
     <deleteBeforeInsert>true</deleteBeforeInsert>
+    <isCreateTable>true</isCreateTable>
   </settings>
 
   <!-- 전역 변수 정의 -->
@@ -424,6 +425,7 @@
            description="추출된 상품 관련 데이터 이관 (동적 변수 사용)"
            enabled="false">
       <sourceQuery targetTable="product_reviews" 
+                   targetSchema="dbo"
                   targetColumns="*" 
                   identityColumns="product_code,customer_id">
         <![CDATA[

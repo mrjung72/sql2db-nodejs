@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const sql = require('mssql');
 const logger = require('../logger');
 const { format } = require('../modules/i18n');
 
@@ -113,20 +114,32 @@ class QueryProcessor {
     async getTableColumns(tableName, database = 'target') {
         try {
             const cacheKey = `${tableName}_${database}`;
-            
+
             if (this.tableColumnCache[cacheKey]) {
                 this.log(format(msg.cacheUsed, { table: tableName, db: database }));
                 return this.tableColumnCache[cacheKey];
             }
-            
+
             this.log(format(msg.columnQuery, { table: tableName, db: database }));
-            
+
+            let parsed;
+            try {
+                parsed = sql.Table.parseName(tableName);
+            } catch (parseErr) {
+                parsed = { name: tableName, schema: null };
+            }
+            const nameLiteral = parsed.name.replace(/'/g, "''");
+            const schemaLiteral = parsed.schema ? parsed.schema.replace(/'/g, "''") : null;
+            const schemaFilter = schemaLiteral ? `AND c.TABLE_SCHEMA = '${schemaLiteral}'` : '';
             const query = `
-                SELECT c.COLUMN_NAME 
+                SELECT c.COLUMN_NAME
                 FROM INFORMATION_SCHEMA.COLUMNS c
-                INNER JOIN sys.columns sc ON c.COLUMN_NAME = sc.name 
-                    AND c.TABLE_NAME = OBJECT_NAME(sc.object_id)
-                WHERE c.TABLE_NAME = '${tableName}'
+                INNER JOIN sys.columns sc ON c.COLUMN_NAME = sc.name
+                INNER JOIN sys.tables t ON sc.object_id = t.object_id
+                    AND c.TABLE_NAME = t.name
+                    AND c.TABLE_SCHEMA = SCHEMA_NAME(t.schema_id)
+                WHERE c.TABLE_NAME = '${nameLiteral}'
+                    ${schemaFilter}
                     AND sc.is_computed = 0
                     AND sc.is_identity = 0
                     AND c.DATA_TYPE NOT IN ('varbinary', 'binary', 'image')
@@ -160,11 +173,20 @@ class QueryProcessor {
      */
     async getIdentityColumns(tableName, database = 'target') {
         try {
+            let parsed;
+            try {
+                parsed = sql.Table.parseName(tableName);
+            } catch (parseErr) {
+                parsed = { name: tableName, schema: null };
+            }
+            const schemaPart = parsed.schema ? `[${parsed.schema.replace(/]/g, ']]')}].` : '';
+            const fullName = `${schemaPart}[${parsed.name.replace(/]/g, ']]')}]`;
+            const fullNameLiteral = fullName.replace(/'/g, "''");
+
             const query = `
                 SELECT c.name AS COLUMN_NAME
                 FROM sys.columns c
-                INNER JOIN sys.tables t ON c.object_id = t.object_id
-                WHERE t.name = '${tableName}'
+                WHERE c.object_id = OBJECT_ID('${fullNameLiteral}')
                   AND c.is_identity = 1
                 ORDER BY c.column_id
             `;

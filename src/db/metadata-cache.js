@@ -43,18 +43,31 @@ class MetadataCache {
       if (!pool) {
         await this.ensureConnected(isSource);
       }
+      let parsed;
+      try {
+          parsed = sql.Table.parseName(tableName);
+      } catch (parseErr) {
+          parsed = { name: tableName, schema: null };
+      }
+      const nameLiteral = parsed.name.replace(/'/g, "''");
+      const schemaLiteral = parsed.schema ? parsed.schema.replace(/'/g, "''") : null;
+      const schemaFilter = schemaLiteral ? `AND c.TABLE_SCHEMA = '${schemaLiteral}'` : '';
+
       const request = (this.getPool(isSource)).request();
       const query = `
-                SELECT 
-                    c.COLUMN_NAME, 
-                    c.DATA_TYPE, 
-                    c.IS_NULLABLE, 
+                SELECT
+                    c.COLUMN_NAME,
+                    c.DATA_TYPE,
+                    c.IS_NULLABLE,
                     c.COLUMN_DEFAULT,
                     c.ORDINAL_POSITION
                 FROM INFORMATION_SCHEMA.COLUMNS c
-                INNER JOIN sys.columns sc ON c.COLUMN_NAME = sc.name 
-                    AND c.TABLE_NAME = OBJECT_NAME(sc.object_id)
-                WHERE c.TABLE_NAME = '${tableName}'
+                INNER JOIN sys.columns sc ON c.COLUMN_NAME = sc.name
+                INNER JOIN sys.tables t ON sc.object_id = t.object_id
+                    AND c.TABLE_NAME = t.name
+                    AND c.TABLE_SCHEMA = SCHEMA_NAME(t.schema_id)
+                WHERE c.TABLE_NAME = '${nameLiteral}'
+                    ${schemaFilter}
                     AND sc.is_computed = 0  -- Exclude computed columns
                     AND sc.is_identity = 0  -- Exclude identity columns
                     AND c.DATA_TYPE NOT IN ('varbinary', 'binary', 'image')  -- Exclude VARBINARY columns
