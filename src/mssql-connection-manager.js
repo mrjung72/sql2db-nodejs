@@ -787,6 +787,125 @@ class MSSQLConnectionManager {
         }
     }
 
+    // Parse schema.table and return { schema, name, fullName } using bracket-quoted full name
+    parseSourceTableName(sourceTableName) {
+        if (!sourceTableName) return null;
+        let parsed;
+        try {
+            parsed = sql.Table.parseName(sourceTableName);
+        } catch (parseErr) {
+            const parts = sourceTableName.split('.');
+            parsed = {
+                schema: parts.length > 1 ? parts[0] : null,
+                name: parts.length > 1 ? parts[1] : parts[0]
+            };
+        }
+        const schema = parsed.schema || 'dbo';
+        const name = parsed.name;
+        const fullName = `[${schema.replace(/]/g, ']]')}].[${name.replace(/]/g, ']]')}]`;
+        return { schema, name, fullName };
+    }
+
+    // Get primary key columns from source table, ordered by key ordinal
+    async getSourceTablePrimaryKey(sourceTableName) {
+        if (!this.isSourceConnected) {
+            await this.connectSource();
+        }
+
+        const { schema, name, fullName } = this.parseSourceTableName(sourceTableName);
+
+        const query = `
+            SELECT c.name AS column_name
+            FROM sys.indexes i
+            INNER JOIN sys.index_columns ic
+                ON i.object_id = ic.object_id AND i.index_id = ic.index_id
+            INNER JOIN sys.columns c
+                ON ic.object_id = c.object_id AND ic.column_id = c.column_id
+            INNER JOIN sys.tables t
+                ON i.object_id = t.object_id
+            INNER JOIN sys.schemas s
+                ON t.schema_id = s.schema_id
+            WHERE i.is_primary_key = 1
+              AND s.name = @schemaName
+              AND t.name = @tableName
+            ORDER BY ic.key_ordinal
+        `;
+
+        const request = this.sourcePool.request();
+        request.input('schemaName', sql.NVarChar(128), schema);
+        request.input('tableName', sql.NVarChar(128), name);
+
+        const result = await request.query(query);
+        return (result.recordset || []).map(row => row.column_name);
+    }
+
+    // Get source table-level MS_Description comment
+    async getSourceTableComment(sourceTableName) {
+        if (!this.isSourceConnected) {
+            await this.connectSource();
+        }
+
+        const { fullName } = this.parseSourceTableName(sourceTableName);
+
+        const query = `
+            SELECT value
+            FROM sys.extended_properties
+            WHERE major_id = OBJECT_ID(@fullName, 'U')
+              AND minor_id = 0
+              AND name = 'MS_Description'
+        `;
+
+        const request = this.sourcePool.request();
+        request.input('fullName', sql.NVarChar(520), fullName);
+
+        const result = await request.query(query);
+        return result.recordset && result.recordset.length > 0 ? result.recordset[0].value : null;
+    }
+
+    // Get source column-level MS_Description comments as { columnName: value }
+    async getSourceColumnComments(sourceTableName) {
+        if (!this.isSourceConnected) {
+            await this.connectSource();
+        }
+
+        const { fullName } = this.parseSourceTableName(sourceTableName);
+
+        const query = `
+            SELECT c.name AS column_name, ep.value
+            FROM sys.extended_properties ep
+            INNER JOIN sys.columns c
+                ON ep.major_id = c.object_id AND ep.minor_id = c.column_id
+            WHERE ep.major_id = OBJECT_ID(@fullName, 'U')
+              AND ep.name = 'MS_Description'
+              AND ep.class = 1
+        `;
+
+        const request = this.sourcePool.request();
+        request.input('fullName', sql.NVarChar(520), fullName);
+
+        const result = await request.query(query);
+        const comments = {};
+        (result.recordset || []).forEach(row => {
+            comments[row.column_name] = row.value;
+        });
+        return comments;
+    }
+
+    // Determine whether a column type can participate in a primary key
+    canBePrimaryKey(typeDeclaration) {
+        if (!typeDeclaration) return false;
+        const t = typeDeclaration.toLowerCase();
+        const disallowedTypes = ['text', 'ntext', 'image', 'xml', 'sql_variant', 'rowversion', 'timestamp', 'hierarchyid', 'geography', 'geometry', 'udt'];
+        if (disallowedTypes.some(dt => t === dt || t.startsWith(dt + '('))) return false;
+        if (t.includes('(max)')) return false;
+        return true;
+    }
+
+    // Normalize NVARCHAR/NCHAR lengths from source (some are shown as -1 or null)
+    isMaxLengthType(typeDeclaration) {
+        return /\(max\)$/i.test(typeDeclaration);
+    }
+
     // Extract source table name from a simple SELECT query
     getSourceTableNameFromQuery(query) {
         if (!query || typeof query !== 'string') return null;
@@ -838,15 +957,41 @@ class MSSQLConnectionManager {
                 await this.connectTarget();
             }
 
-            let parsed;
+            let targetParsed;
             try {
-                parsed = sql.Table.parseName(targetTable);
+                targetParsed = sql.Table.parseName(targetTable);
             } catch (parseErr) {
-                parsed = { name: targetTable, schema: null };
+                targetParsed = { name: targetTable, schema: null };
             }
-            const fullName = parsed.schema
-                ? `[${parsed.schema}].[${parsed.name}]`
-                : `[${parsed.name}]`;
+            const targetSchema = targetParsed.schema || 'dbo';
+            const targetName = targetParsed.name;
+            const safeTargetSchema = targetSchema.replace(/]/g, ']]');
+            const safeTargetName = targetName.replace(/]/g, ']]');
+            const fullName = `[${safeTargetSchema}].[${safeTargetName}]`;
+
+            // Determine source table for metadata copy (comments, primary key)
+            const sourceTableName = this.getSourceTableNameFromQuery(sourceQuery);
+            let primaryKeyColumns = [];
+            let tableComment = null;
+            let columnComments = {};
+
+            if (sourceTableName) {
+                const upperQuery = sourceQuery.toUpperCase();
+                const isComplexQuery = /\b(JOIN|UNION|INTERSECT|EXCEPT|APPLY|PIVOT|UNPIVOT|INTO|WITH)\b/.test(upperQuery);
+                if (isComplexQuery) {
+                    console.log(`Source query contains JOIN/UNION/etc. Skipping comment/PK extraction.`);
+                } else {
+                    try {
+                        [tableComment, columnComments, primaryKeyColumns] = await Promise.all([
+                            this.getSourceTableComment(sourceTableName),
+                            this.getSourceColumnComments(sourceTableName),
+                            this.getSourceTablePrimaryKey(sourceTableName)
+                        ]);
+                    } catch (metaErr) {
+                        console.warn(`Failed to extract source metadata: ${metaErr.message}`);
+                    }
+                }
+            }
 
             // Try sys.dm_exec_describe_first_result_set first
             let columns = [];
@@ -874,7 +1019,6 @@ class MSSQLConnectionManager {
 
             // Fallback: read source table schema from INFORMATION_SCHEMA
             if (columns.length === 0) {
-                const sourceTableName = this.getSourceTableNameFromQuery(sourceQuery);
                 if (!sourceTableName) {
                     throw new Error(`Could not determine source table name for isCreateTable from query: ${sourceQuery}`);
                 }
@@ -889,16 +1033,46 @@ class MSSQLConnectionManager {
                 }));
             }
 
-            const columnDefinitions = columns.map(col =>
-                `[${col.name}] ${col.typeDeclaration} ${col.isNullable ? 'NULL' : 'NOT NULL'}`
-            ).join(',\n    ');
+            // Filter primary key columns to those present in the result set
+            const columnNameSet = new Set(columns.map(c => c.name));
+            primaryKeyColumns = primaryKeyColumns.filter(pk => columnNameSet.has(pk));
+
+            // Verify PK columns have eligible types
+            const pkCanBeCreated = primaryKeyColumns.length > 0 && primaryKeyColumns.every(pk => {
+                const col = columns.find(c => c.name === pk);
+                return col && this.canBePrimaryKey(col.typeDeclaration);
+            });
+
+            // Build column definitions. PK columns are forced to NOT NULL.
+            const columnDefinitions = columns.map(col => {
+                const isPk = primaryKeyColumns.includes(col.name);
+                const nullability = isPk ? 'NOT NULL' : (col.isNullable ? 'NULL' : 'NOT NULL');
+                return `[${col.name}] ${col.typeDeclaration} ${nullability}`;
+            }).join(',\n    ');
+
+            const pkConstraint = pkCanBeCreated
+                ? `,\n    CONSTRAINT [PK_${safeTargetSchema}_${safeTargetName}] PRIMARY KEY (${primaryKeyColumns.map(c => `[${c.replace(/]/g, ']]')}]`).join(', ')})`
+                : '';
+
+            const tableCommentSql = tableComment
+                ? `EXEC sys.sp_addextendedproperty @name = N'MS_Description', @value = N'${tableComment.replace(/'/g, "''")}', @level0type = N'SCHEMA', @level0name = N'${safeTargetSchema}', @level1type = N'TABLE', @level1name = N'${safeTargetName}';`
+                : '';
+
+            const columnCommentSqls = columns.map(col => {
+                const comment = columnComments[col.name];
+                if (!comment) return '';
+                const safeColName = col.name.replace(/]/g, ']]');
+                return `EXEC sys.sp_addextendedproperty @name = N'MS_Description', @value = N'${comment.replace(/'/g, "''")}', @level0type = N'SCHEMA', @level0name = N'${safeTargetSchema}', @level1type = N'TABLE', @level1name = N'${safeTargetName}', @level2type = N'COLUMN', @level2name = N'${safeColName}';`;
+            }).filter(Boolean);
 
             const createQuery = `
                 IF OBJECT_ID('${fullName}', 'U') IS NULL
                 BEGIN
                     CREATE TABLE ${fullName} (
-                        ${columnDefinitions}
-                    )
+                        ${columnDefinitions}${pkConstraint}
+                    );
+                    ${tableCommentSql}
+                    ${columnCommentSqls.join('\n    ')}
                 END
             `;
 
