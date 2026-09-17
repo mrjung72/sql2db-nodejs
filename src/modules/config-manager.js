@@ -150,6 +150,7 @@ class ConfigManager {
                 dynamicVariables: [],
                 globalProcesses: {},
                 globalColumnOverrides: new Map(),
+                resources: [],
                 queries: []
             };
             
@@ -179,6 +180,11 @@ class ConfigManager {
                     migration.dynamicVariables.dynamicVar,
                     config.settings.sourceDatabase
                 );
+            }
+
+            // 리소스(프로시저, 함수, 뷰, 트리거) 파싱
+            if (migration.resources) {
+                config.resources = this.parseResources(migration.resources, config.settings);
             }
             
             // 쿼리 파싱
@@ -555,6 +561,76 @@ class ConfigManager {
         });
         
         return queries;
+    }
+
+    /**
+     * 리소스(프로시저, 함수, 뷰, 트리거) 섹션 파싱
+     */
+    parseResources(resourcesXml, settings) {
+        if (!resourcesXml || resourcesXml.enabled === 'false') {
+            return [];
+        }
+
+        const validResourceTypes = ['procedure', 'function', 'view', 'trigger'];
+        const validResourceAttrs = [
+            'id', 'description', 'enabled', 'name', 'schema', 'targetSchema', 'targetName',
+            'type', 'dropBeforeCreate'
+        ];
+
+        const resourceList = Array.isArray(resourcesXml.resource)
+            ? resourcesXml.resource
+            : (resourcesXml.resource ? [resourcesXml.resource] : []);
+
+        const resources = resourceList.map((r, index) => {
+            const attrs = Object.keys(r);
+            const invalidAttrs = attrs.filter(attr => !validResourceAttrs.includes(attr));
+            if (invalidAttrs.length > 0) {
+                const errorMsg = `❌ resources[${index}] (id: ${r.id || '미지정'})에 잘못된 속성이 있습니다: ${invalidAttrs.join(', ')}\n` +
+                                `   허용되는 속성: ${validResourceAttrs.join(', ')}`;
+                logger.error(errorMsg);
+                throw new Error(`XML 파싱 오류: ${errorMsg}`);
+            }
+
+            if (!r.name) {
+                throw new Error(`XML 파싱 오류: resources[${index}]에 name 속성이 없습니다.`);
+            }
+            if (!r.type || !validResourceTypes.includes(r.type.toLowerCase())) {
+                throw new Error(`XML 파싱 오류: resources[${index}]의 type은 procedure, function, view, trigger 중 하나여야 합니다.`);
+            }
+
+            const defaultSchema = r.schema || settings.targetSchema || 'dbo';
+            const parsed = this.splitSchemaAndName(r.name, defaultSchema);
+            const targetSchema = r.targetSchema || parsed.schema;
+            const targetName = r.targetName || parsed.name;
+
+            return {
+                id: r.id || `${parsed.schema}_${parsed.name}`,
+                description: r.description,
+                type: r.type.toLowerCase(),
+                sourceSchema: parsed.schema,
+                sourceName: parsed.name,
+                targetSchema,
+                targetName,
+                dropBeforeCreate: r.dropBeforeCreate !== 'false',
+                enabled: r.enabled !== 'false'
+            };
+        });
+
+        logger.info('리소스 파싱 완료', {
+            totalResources: resources.length,
+            enabledResources: resources.filter(r => r.enabled).length
+        });
+
+        return resources;
+    }
+
+    splitSchemaAndName(fullName, defaultSchema) {
+        if (!fullName) return { schema: defaultSchema || 'dbo', name: '' };
+        const parts = fullName.split('.');
+        if (parts.length >= 2) {
+            return { schema: parts[0], name: parts.slice(1).join('.') };
+        }
+        return { schema: defaultSchema || 'dbo', name: fullName };
     }
 
     /**

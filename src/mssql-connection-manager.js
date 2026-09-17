@@ -130,7 +130,13 @@ const messages = {
         targetQueryFailed: 'Target DB query execution failed: {message}',
         sourceQueryExecuteFailed: 'Source DB query execution failed: {message}',
         fkEnable: 'Enabling',
-        fkDisable: 'Disabling'
+        fkDisable: 'Disabling',
+        resourceDefinitionNotFound: 'Resource definition not found in source: {schema}.{name} ({type})',
+        resourceDefinitionFound: 'Resource definition found: {schema}.{name} ({type}) - {length} chars',
+        resourceMigrated: 'Resource migrated to target: {target} ({type})',
+        resourceMigrateFailed: 'Resource migration failed: {target} ({type}) - {message}',
+        unsupportedResourceType: 'Unsupported resource type: {type}',
+        resourceSchemaMismatch: 'Source and target schemas differ for {name}; definition header will be rewritten to {targetSchema}.{targetName}'
     },
     kr: {
         dbinfoLoaded: 'dbinfo.json 로드 완료: {count}개 DB 설정',
@@ -246,7 +252,13 @@ const messages = {
         targetQueryFailed: '타겟 DB 쿼리 실행 실패: {message}',
         sourceQueryExecuteFailed: '소스 DB 쿼리 실행 실패: {message}',
         fkEnable: '활성화',
-        fkDisable: '비활성화'
+        fkDisable: '비활성화',
+        resourceDefinitionNotFound: '소스에서 리소스 정의를 찾을 수 없습니다: {schema}.{name} ({type})',
+        resourceDefinitionFound: '리소스 정의 찾음: {schema}.{name} ({type}) - {length}자',
+        resourceMigrated: '타겟으로 리소스 이관 완료: {target} ({type})',
+        resourceMigrateFailed: '리소스 이관 실패: {target} ({type}) - {message}',
+        unsupportedResourceType: '지원하지 않는 리소스 타입: {type}',
+        resourceSchemaMismatch: '{name}의 소스/타겟 스키마가 다릅니다. 정의 헤더를 {targetSchema}.{targetName}(으)로 다시 작성합니다.'
     }
 };
 
@@ -1254,6 +1266,149 @@ class MSSQLConnectionManager {
             }
         } catch (error) {
             console.error(format(msg.closeConnectionError, { message: error.message }));
+        }
+    }
+
+    // Resource type metadata
+    getResourceTypeMap() {
+        return {
+            procedure: { typeLetters: ['P'], keyword: 'PROCEDURE' },
+            function: { typeLetters: ['FN', 'IF', 'TF'], keyword: 'FUNCTION' },
+            view: { typeLetters: ['V'], keyword: 'VIEW' },
+            trigger: { typeLetters: ['TR'], keyword: 'TRIGGER' }
+        };
+    }
+
+    getResourceObjectType(type) {
+        const map = this.getResourceTypeMap();
+        const normalized = (type || '').toLowerCase();
+        if (!map[normalized]) {
+            throw new Error(format(msg.unsupportedResourceType, { type }));
+        }
+        return map[normalized];
+    }
+
+    escapeRegex(str) {
+        return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+
+    parseResourceName(name, defaultSchema) {
+        if (!name) return { schema: defaultSchema || 'dbo', name: '' };
+        const parts = name.split('.');
+        if (parts.length >= 2) {
+            return { schema: parts[0], name: parts.slice(1).join('.') };
+        }
+        return { schema: defaultSchema || 'dbo', name };
+    }
+
+    // Retrieve a programmable object definition from the source database
+    async getResourceDefinition(sourceSchema, sourceName, type) {
+        const typeInfo = this.getResourceObjectType(type);
+        const typeFilter = typeInfo.typeLetters.length === 1
+            ? `= '${typeInfo.typeLetters[0]}'`
+            : `IN ('${typeInfo.typeLetters.join("','")}')`;
+
+        const query = `
+            SELECT sm.definition, o.type
+            FROM sys.objects o
+            INNER JOIN sys.schemas s ON o.schema_id = s.schema_id
+            INNER JOIN sys.sql_modules sm ON o.object_id = sm.object_id
+            WHERE o.name = @objectName
+              AND s.name = @schemaName
+              AND o.type ${typeFilter}
+        `;
+
+        try {
+            const request = this.sourcePool.request();
+            request.input('objectName', sql.NVarChar, sourceName);
+            request.input('schemaName', sql.NVarChar, sourceSchema);
+            const result = await request.query(query);
+
+            if (!result.recordset || result.recordset.length === 0) {
+                return null;
+            }
+
+            return result.recordset[0];
+        } catch (error) {
+            throw new Error(format(msg.resourceDefinitionNotFound, { schema: sourceSchema, name: sourceName, type }) + `: ${error.message}`);
+        }
+    }
+
+    // Rewrite the schema/name in the CREATE header when target differs from source
+    replaceSchemaInDefinition(definition, type, sourceSchema, sourceName, targetSchema, targetName) {
+        if (!definition) return definition;
+        const typeInfo = this.getResourceObjectType(type);
+        const keyword = typeInfo.keyword;
+        const escapedSchema = this.escapeRegex(sourceSchema);
+        const escapedName = this.escapeRegex(sourceName);
+
+        const headerRegex = new RegExp(
+            `(CREATE\\s+${keyword}\\s+)(?:\\[?${escapedSchema}\\]?\\s*\\.\\s*)?(?:\\[?${escapedName}\\]?)(?=\\s|\\()`,
+            'i'
+        );
+
+        return definition.replace(headerRegex, `$1[${targetSchema}].[${targetName}]`);
+    }
+
+    // Migrate a programmable object from source to target
+    async migrateResourceToTarget(resource) {
+        const {
+            sourceSchema, sourceName, targetSchema, targetName, type, dropBeforeCreate
+        } = resource;
+
+        const typeInfo = this.getResourceObjectType(type);
+        const keyword = typeInfo.keyword;
+
+        const definitionRow = await this.getResourceDefinition(sourceSchema, sourceName, type);
+        if (!definitionRow || !definitionRow.definition) {
+            throw new Error(format(msg.resourceDefinitionNotFound, { schema: sourceSchema, name: sourceName, type }));
+        }
+
+        let definition = definitionRow.definition;
+
+        if (sourceSchema !== targetSchema || sourceName !== targetName) {
+            console.log(format(msg.resourceSchemaMismatch, {
+                name: `${sourceSchema}.${sourceName}`,
+                targetSchema,
+                targetName
+            }));
+            definition = this.replaceSchemaInDefinition(definition, type, sourceSchema, sourceName, targetSchema, targetName);
+        }
+
+        console.log(format(msg.resourceDefinitionFound, {
+            schema: sourceSchema,
+            name: sourceName,
+            type,
+            length: definition.length
+        }));
+
+        const targetFullName = `[${targetSchema}].[${targetName}]`;
+
+        let objectIdCheck;
+        if (type === 'function') {
+            objectIdCheck = `(OBJECT_ID('${targetFullName}', 'FN') IS NOT NULL OR OBJECT_ID('${targetFullName}', 'IF') IS NOT NULL OR OBJECT_ID('${targetFullName}', 'TF') IS NOT NULL)`;
+        } else {
+            const objectType = definitionRow.type || typeInfo.typeLetters[0];
+            objectIdCheck = `OBJECT_ID('${targetFullName}', '${objectType}') IS NOT NULL`;
+        }
+
+        const dropPart = dropBeforeCreate
+            ? `IF ${objectIdCheck}
+    DROP ${keyword} ${targetFullName};`
+            : '';
+
+        const escapedDefinition = definition.replace(/'/g, "''");
+        const migrationQuery = `
+            ${dropPart}
+            EXEC(N'${escapedDefinition}');
+        `;
+
+        try {
+            const targetRequest = this.targetPool.request();
+            await targetRequest.query(migrationQuery);
+            console.log(format(msg.resourceMigrated, { target: targetFullName, type }));
+        } catch (error) {
+            throw new Error(format(msg.resourceMigrateFailed, { target: targetFullName, type, message: error.message }));
         }
     }
 

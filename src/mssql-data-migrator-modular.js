@@ -4,6 +4,7 @@ const MSSQLConnectionManager = require('./mssql-connection-manager');
 const ProgressManager = require('./progress-manager');
 const logger = require('./logger');
 const { getAppRoot } = require('./modules/paths');
+const { format } = require('./modules/i18n');
 
 // 모듈화된 컴포넌트들
 const ConfigManager = require('./modules/config-manager');
@@ -112,6 +113,11 @@ const messages = {
         totalDataToMigrate: '📈 Total data to migrate:',
         dryRunNote: '\n💡 Note: DRY RUN mode does not modify actual data.',
         dryRunError: '❌ Error during DRY RUN:',
+        resourceMigrationStart: '=== Resource migration started ===',
+        resourceMigrationComplete: '=== Resource migration completed ===',
+        resourceMigrationFailed: 'Resource migration failed: {id} - {error}',
+        resourceMigrationSimulating: '\n📦 Resource migration simulation:',
+        resourceDefinitionPreview: '   {id}: {target} ({type}) - {length} chars',
         configValidated: '✅ Configuration validation completed',
         totalQueriesFound: '- Total queries:',
         enabledQueriesFound: '- Enabled queries:',
@@ -228,6 +234,11 @@ const messages = {
         totalDataToMigrate: '📈 총 이관 예정 데이터:',
         dryRunNote: '\n💡 참고: DRY RUN 모드에서는 실제 데이터 변경이 일어나지 않습니다.',
         dryRunError: '❌ DRY RUN 실행 중 오류:',
+        resourceMigrationStart: '=== Resource migration started ===',
+        resourceMigrationComplete: '=== Resource migration completed ===',
+        resourceMigrationFailed: 'Resource migration failed: {id} - {error}',
+        resourceMigrationSimulating: '\n📦 Resource migration simulation:',
+        resourceDefinitionPreview: '   {id}: {target} ({type}) - {length} chars',
         configValidated: '✅ 설정 검증 완료',
         totalQueriesFound: '- 전체 쿼리 수:',
         enabledQueriesFound: '- 활성화된 쿼리 수:',
@@ -653,6 +664,80 @@ class MSSQLDataMigrator {
     }
 
     /**
+     * 리소스(프로시저, 함수, 뷰, 트리거) 이관 실행
+     */
+    async executeResourceMigrations() {
+        if (!this.config.resources || this.config.resources.length === 0) {
+            return;
+        }
+
+        const enabledResources = this.config.resources.filter(r => r.enabled);
+        if (enabledResources.length === 0) {
+            return;
+        }
+
+        this.log(this.msg.resourceMigrationStart);
+
+        for (const resource of enabledResources) {
+            try {
+                this.log(`  • ${resource.id}: ${resource.description || resource.targetName} (${resource.type})`);
+                await this.connectionManager.migrateResourceToTarget(resource);
+            } catch (error) {
+                const errorMsg = format(this.msg.resourceMigrationFailed, { id: resource.id, error: error.message });
+                this.log(errorMsg);
+                throw new Error(errorMsg);
+            }
+        }
+
+        this.log(this.msg.resourceMigrationComplete);
+    }
+
+    /**
+     * DRY RUN용 리소스 시뮬레이션
+     */
+    async simulateResourceMigrations() {
+        if (!this.config.resources || this.config.resources.length === 0) {
+            return [];
+        }
+
+        const enabledResources = this.config.resources.filter(r => r.enabled);
+        if (enabledResources.length === 0) {
+            return [];
+        }
+
+        const results = [];
+        console.log(this.msg.resourceMigrationSimulating);
+
+        for (const resource of enabledResources) {
+            const target = `[${resource.targetSchema}].[${resource.targetName}]`;
+            try {
+                const definitionRow = await this.connectionManager.getResourceDefinition(
+                    resource.sourceSchema,
+                    resource.sourceName,
+                    resource.type
+                );
+                if (!definitionRow || !definitionRow.definition) {
+                    console.log(`   ❌ ${resource.id}: ${target} (${resource.type}) - definition not found`);
+                    results.push({ id: resource.id, target, type: resource.type, status: 'error', error: 'definition not found' });
+                } else {
+                    console.log(format(this.msg.resourceDefinitionPreview, {
+                        id: resource.id,
+                        target,
+                        type: resource.type,
+                        length: definitionRow.definition.length
+                    }));
+                    results.push({ id: resource.id, target, type: resource.type, status: 'success', length: definitionRow.definition.length });
+                }
+            } catch (error) {
+                console.log(`   ❌ ${resource.id}: ${target} (${resource.type}) - ${error.message}`);
+                results.push({ id: resource.id, target, type: resource.type, status: 'error', error: error.message });
+            }
+        }
+
+        return results;
+    }
+
+    /**
      * 전체 이관 프로세스 실행
      */
     async executeMigration(resumeMigrationId = null) {
@@ -699,6 +784,9 @@ class MSSQLDataMigrator {
             if (this.config.globalProcesses && this.config.globalProcesses.preProcessGroups) {
                 await this.scriptProcessor.executeGlobalProcessGroups('preProcess', this.config, this.progressManager);
             }
+
+            // 리소스(프로시저, 함수, 뷰, 트리거) 이관
+            await this.executeResourceMigrations();
             
             // 동적 변수 추출 실행
             if (this.config.dynamicVariables && this.config.dynamicVariables.length > 0) {
@@ -942,6 +1030,9 @@ class MSSQLDataMigrator {
                     }
                 }
             }
+
+            // 리소스(프로시저, 함수, 뷰, 트리거) 시뮬레이션
+            const resourceResults = await this.simulateResourceMigrations();
             
             // 쿼리 시뮬레이션
             const enabledQueries = this.config.queries.filter(q => q.enabled !== false);
@@ -988,6 +1079,8 @@ class MSSQLDataMigrator {
             const duration = ((Date.now() - startTime) / 1000).toFixed(2);
             const successCount = results.filter(r => r.status === 'success').length;
             const failureCount = results.filter(r => r.status === 'error').length;
+            const resourceSuccessCount = resourceResults.filter(r => r.status === 'success').length;
+            const resourceFailureCount = resourceResults.filter(r => r.status === 'error').length;
             
             console.log('\n' + '='.repeat(80));
             console.log(this.msg.dryRunSummary);
@@ -1002,6 +1095,15 @@ class MSSQLDataMigrator {
             const failureLabel = LANGUAGE === 'kr' ? '실패한 쿼리' : 'failed queries';
             console.log(`✅ ${successLabel}: ${successCount}${countSuffix}`);
             console.log(`❌ ${failureLabel}: ${failureCount}${countSuffix}`);
+
+            if (resourceResults.length > 0) {
+                const resourceTotalLabel = LANGUAGE === 'kr' ? '리소스' : 'resources';
+                const resourceSuccessLabel = LANGUAGE === 'kr' ? '성공한 리소스' : 'successful resources';
+                const resourceFailureLabel = LANGUAGE === 'kr' ? '실패한 리소스' : 'failed resources';
+                console.log(`${resourceTotalLabel}: ${resourceResults.length}${countSuffix}`);
+                console.log(`✅ ${resourceSuccessLabel}: ${resourceSuccessCount}${countSuffix}`);
+                console.log(`❌ ${resourceFailureLabel}: ${resourceFailureCount}${countSuffix}`);
+            }
             
             if (failureCount > 0) {
                 const failedListLabel = LANGUAGE === 'kr' ? '\n❌ 실패한 쿼리 목록:' : '\n❌ Failed queries:';
@@ -1014,11 +1116,12 @@ class MSSQLDataMigrator {
             console.log(this.msg.dryRunNote);
             
             return {
-                success: failureCount === 0,
+                success: failureCount === 0 && resourceFailureCount === 0,
                 totalQueries,
                 totalRows,
                 successCount,
                 failureCount,
+                resourceResults,
                 duration: parseFloat(duration),
                 results
             };
@@ -1071,6 +1174,11 @@ class MSSQLDataMigrator {
             
             const validGlobalProcessGroupAttributes = [
                 'id', 'description', 'enabled'
+            ];
+            
+            const validResourceAttributes = [
+                'id', 'description', 'enabled', 'name', 'schema', 'targetSchema', 'targetName',
+                'type', 'dropBeforeCreate'
             ];
             
             if (!this.config.settings) {
@@ -1173,6 +1281,32 @@ class MSSQLDataMigrator {
                 }
             }
             
+            // resources 속성명 검증
+            if (this.config.resources && Array.isArray(this.config.resources)) {
+                const validResourceTypes = ['procedure', 'function', 'view', 'trigger'];
+                for (let i = 0; i < this.config.resources.length; i++) {
+                    const resource = this.config.resources[i];
+                    const invalidAttrs = Object.keys(resource).filter(
+                        attr => !validResourceAttributes.includes(attr)
+                    );
+                    
+                    if (invalidAttrs.length > 0) {
+                        const errorMsg = `❌ resources[${i}] (id: ${resource.id || '미지정'})`;
+                        console.error(`${errorMsg}: ${invalidAttrs.join(', ')}`);
+                        console.error(`   Allowed attributes: ${validResourceAttributes.join(', ')}`);
+                        const errorText = LANGUAGE === 'kr' ? `resources에 잘못된 속성명이 있습니다: ${invalidAttrs.join(', ')}` : `Invalid attributes in resources: ${invalidAttrs.join(', ')}`;
+                        throw new Error(errorText);
+                    }
+                    
+                    if (!resource.name) {
+                        throw new Error(`resources[${i}] is missing name attribute`);
+                    }
+                    if (!resource.type || !validResourceTypes.includes(resource.type)) {
+                        throw new Error(`resources[${i}] has invalid type. Allowed: procedure, function, view, trigger`);
+                    }
+                }
+            }
+            
             // globalProcesses 속성명 검증
             if (this.config.globalProcesses) {
                 if (this.config.globalProcesses.preProcessGroups) {
@@ -1215,6 +1349,13 @@ class MSSQLDataMigrator {
             console.log(`   ${this.msg.enabledQueriesFound} ${enabledQueries.length}`);
             if (this.config.dynamicVariables) {
                 console.log(`   ${this.msg.dynamicVariablesFound} ${this.config.dynamicVariables.length}`);
+            }
+            if (this.config.resources) {
+                const enabledResources = this.config.resources.filter(r => r.enabled);
+                const resourceLabel = LANGUAGE === 'kr' ? '- 리소스 수:' : '- Resources:';
+                const enabledResourceLabel = LANGUAGE === 'kr' ? '- 활성화된 리소스 수:' : '- Enabled resources:';
+                console.log(`   ${resourceLabel} ${this.config.resources.length}`);
+                console.log(`   ${enabledResourceLabel} ${enabledResources.length}`);
             }
             
             return true;
