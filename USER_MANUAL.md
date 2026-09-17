@@ -32,6 +32,12 @@ The MSSQL Data Migration Tool is a Node.js-based tool for efficiently performing
 - 🆕 **Case-Insensitive Column Matching**: Automatically matches column names regardless of case
 - 🆕 **Large Dataset Support**: Handles SQL Server 2100 parameter limit automatically
 - 🆕 **Enhanced Debugging**: Detailed diagnostics for troubleshooting delete operations
+- 🆕 **Target Schema Support**: Automatic schema combination via `targetSchema`
+- 🆕 **Target Table Auto-Creation**: Create tables with PK and comments using `isCreateTable`
+- 🆕 **Resource Migration**: Migrate procedures, functions, views, and triggers
+- 🆕 **Unit Work Error Control**: Continue or stop with `ignoreUnitWorkError`
+- 🆕 **Console Log to File**: `console.*` outputs are automatically written to the log file
+- 🆕 **Docker Compose Test Environment**: Local MSSQL test environment setup support
 
 ### 🆕 What's New in v0.9.1
 - Non-interactive CLI via `app.js --mode` (validate/test/migrate/help)
@@ -640,6 +646,14 @@ node src/migrate-cli.js migrate --query ./queries/migration-queries.xml
   - `true`: Delete target data matching source business key values before migration
     - ⚠️ **IMPORTANT**: You must specify the columns used as delete criteria in the `identityColumns` attribute of each query
   - `false`: Insert directly without deletion (UPSERT mode)
+- **isCreateTable**: Whether to create the target table automatically if it does not exist (default: false)
+  - `true`: Create target table based on source/target metadata (including PK and comments)
+  - `false`: Use existing table
+- **targetSchema**: Default target schema (default: none)
+  - If `targetTable` does not include a schema, it is automatically combined as `<targetSchema>.<targetTable>`
+- **ignoreUnitWorkError**: Whether to continue when a unit query/table error occurs (default: false)
+  - `true`: Mark the failed query as failed and continue with the next query
+  - `false`: Stop the entire migration immediately on error
 - **logLevel**: Logging level (DEBUG, INFO, WARN, ERROR, FATAL)
 
 ### Query Structure
@@ -697,6 +711,20 @@ node src/migrate-cli.js migrate --query ./queries/migration-queries.xml
   - `true`: Delete target data using source business key values before migration
     - ⚠️ **IMPORTANT**: You must specify the columns used as delete criteria in the `identityColumns` attribute
   - `false`: Insert directly without deletion
+- `targetSchema`: Individual target schema (overrides global `settings.targetSchema`)
+- `isCreateTable`: Whether to create the target table automatically (overrides global `settings.isCreateTable`)
+- `sourceQueryFile`: Path to an external SQL file (used instead of the `sourceQuery` element content)
+
+#### `sourceQuery` Element Attributes
+When using the `sourceQuery` element, the following attributes can be specified:
+- `targetTable`: Target table name (required)
+- `targetSchema`: Target schema
+- `targetColumns`: Target column list
+- `identityColumns`: Business key columns (delete criteria)
+- `sourceQueryFile`: SQL file path
+- `applyGlobalColumns`: Selectively apply global column overrides (e.g., `all`, `created_date`)
+- `deleteBeforeInsert`: Whether to delete before insert
+- `isCreateTable`: Whether to create the target table automatically
 
 ## 🔄 Dynamic Variables System
 
@@ -1649,6 +1677,171 @@ DEBUG_SCRIPTS=true node src/migrate-cli.js migrate queries.xml
 2. **Validate configuration**: Use `validate` command
 3. **Test connections**: Use `list-dbs` command
 4. **Resume migration**: Use `resume` command for interrupted migrations
+
+## 🆕 Features and Attributes Added Since v0.9.1
+
+### 1. Summary of Major Changes
+
+| Version | Major Changes |
+|---------|---------------|
+| v0.10.1 | Added `docker-compose.yml` and SQL files for MSSQL testing |
+| v0.10.2 | 3rd party library version updates |
+| v0.11.1 | Improved data input speed, added target table auto-creation (`isCreateTable`) |
+| v1.0.1 | Stabilization release |
+| v1.0.2 | Added global `settings.isCreateTable` setting |
+| v1.0.3 | Added `targetSchema` attribute (settings/query/sourceQuery) |
+| v1.0.4 | Added `enabled`, `runInTransaction` attributes to pre/post processing |
+| v1.0.5 | Primary Key and comments applied when creating tables |
+| v1.0.6 | Table creation feature improvements |
+| v1.0.7 | Improved `SELECT *` automatic expansion logic |
+| v1.1.0 | Added `resources` section for procedure/function/view/trigger migration |
+| v1.1.1 | Skip unnecessary PK deletion when target table is empty |
+| v1.1.2 | `console.*` outputs are also written to log file |
+| v1.1.3 | Added `ignoreUnitWorkError` attribute to control unit query error handling |
+
+### 2. Summary of New XML Attributes
+
+#### New `settings` Attributes
+- `isCreateTable`: Whether to create target table automatically when missing (default: `false`)
+- `targetSchema`: Default target schema
+- `ignoreUnitWorkError`: Whether to continue with the next query when a unit query fails (default: `false`)
+
+#### New `query` / `sourceQuery` Attributes
+- `targetSchema`: Individual target schema
+- `isCreateTable`: Individual table auto-creation flag
+- `sourceQueryFile`: Path to an external SQL file
+- `applyGlobalColumns`: Selectively apply global column overrides
+- `deleteBeforeInsert`: Also available inside the `sourceQuery` element
+
+#### `resource` Attributes
+- `id`: Resource identifier
+- `description`: Description
+- `enabled`: Whether to execute (`true`/`false`)
+- `type`: `procedure`, `function`, `view`, `trigger`
+- `name`: Source resource name
+- `schema`: Source schema
+- `targetName`: Target resource name (defaults to `name`)
+- `targetSchema`: Target schema
+- `dropBeforeCreate`: Whether to drop existing resource before creating (`true`/`false`)
+
+#### Pre/Post Processing Attributes
+- `enabled`: Whether to execute pre/post processing (`true`/`false`)
+- `runInTransaction`: Whether to run inside a transaction
+- `database`: Target database (`source` or `target`)
+- `applyGlobalColumns`: Apply column overrides to `SELECT *`/`INSERT` in the script
+
+### 3. Using `targetSchema`
+
+When `targetTable` does not include a schema, `targetSchema` is automatically combined.
+
+```xml
+<settings>
+  <targetSchema>dbo</targetSchema>
+</settings>
+
+<queries>
+  <query id="users" targetTable="users" enabled="true">
+    <sourceQuery targetTable="users" identityColumns="user_id" deleteBeforeInsert="true">
+      SELECT * FROM users
+    </sourceQuery>
+  </query>
+</queries>
+```
+
+The target table is processed as `dbo.users`. If `targetTable` already includes a schema (e.g., `[dbo].[users]` or `schema.table`), it is not duplicated.
+
+### 4. Using `isCreateTable`
+
+When `isCreateTable="true"`, the tool creates the target table based on source metadata, applying Primary Key and comments.
+
+```xml
+<settings>
+  <isCreateTable>true</isCreateTable>
+  <targetSchema>dbo</targetSchema>
+</settings>
+
+<queries>
+  <query id="new_table" targetTable="new_users" enabled="true">
+    <sourceQuery targetTable="new_users" identityColumns="user_id">
+      SELECT user_id, user_name FROM source_users
+    </sourceQuery>
+  </query>
+</queries>
+```
+
+It can be overridden per query:
+
+```xml
+<query id="existing_table" targetTable="old_users" isCreateTable="false" enabled="true">
+```
+
+### 5. Using `ignoreUnitWorkError`
+
+Set to `true` to continue the migration when a single query/table fails.
+
+```xml
+<settings>
+  <ignoreUnitWorkError>true</ignoreUnitWorkError>
+</settings>
+```
+
+- `true`: The failed query is recorded in `failedQueries` and the migration continues
+- `false` or unset: The entire migration stops immediately on error
+
+### 6. `resources` Migration
+
+The `resources` section migrates stored procedures, functions, views, and triggers from the source to the target.
+
+```xml
+<resources>
+  <resource id="usp_audit_log"
+            description="Audit log stored procedure"
+            enabled="true"
+            type="procedure"
+            name="usp_audit_log"
+            schema="dbo"
+            targetSchema="dbo"
+            targetName="usp_audit_log"
+            dropBeforeCreate="true"/>
+</resources>
+```
+
+Supported `type` values: `procedure`, `function`, `view`, `trigger`.
+
+### 7. Console Log to File
+
+Starting with v1.1.2, `console.log`, `console.warn`, `console.error`, `console.info`, and `console.debug` outputs are written to both the console and `logs/migration-YYYY-MM-DD.log`. The `logger.js` module handles this automatically with no extra configuration.
+
+### 8. Docker Compose Test Environment
+
+Starting with v0.10.1, `docker-compose.yml` and test SQL files are included. Use the following command to set up a local MSSQL environment:
+
+```bash
+docker-compose up -d
+```
+
+The SQL files in the `test/` directory can be used to quickly configure test databases.
+
+### 9. `SELECT *` Auto-Expansion Improvements
+
+`SELECT *` in source queries and pre/post scripts is automatically expanded based on the target table's column metadata. IDENTITY columns are excluded, and `applyGlobalColumns` may automatically add global column override columns.
+
+### 10. Pre/Post Processing Attributes
+
+The following attributes can be applied to per-query `preProcess`/`postProcess` elements:
+
+```xml
+<query id="migrate_users" targetTable="users" enabled="true">
+  <preProcess description="Backup users" enabled="true" runInTransaction="true" database="target" applyGlobalColumns="true">
+    <![CDATA[INSERT INTO backup_users SELECT * FROM users]]>
+  </preProcess>
+  <sourceQuery targetTable="users" identityColumns="user_id">
+    SELECT * FROM users WHERE status = 'ACTIVE'
+  </sourceQuery>
+</query>
+```
+
+---
 
 ## 📞 Support
 

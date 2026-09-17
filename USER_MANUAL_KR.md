@@ -32,6 +32,12 @@ MSSQL 데이터 이관 도구는 Microsoft SQL Server 간의 데이터 이관을
 - 🆕 **대소문자 구분 없는 컬럼 매칭**: 컬럼명 대소문자에 관계없이 자동 매칭
 - 🆕 **대량 데이터 지원**: SQL Server 2100 파라미터 제한 자동 처리
 - 🆕 **향상된 디버깅**: 삭제 작업 문제 해결을 위한 상세 진단
+- 🆕 **타겟 스키마 지정**: `targetSchema`로 스키마 자동 조합
+- 🆕 **타겟 테이블 자동 생성**: `isCreateTable`으로 테이블 생성 (PK/코멘트 적용)
+- 🆕 **리소스 이관**: 프로시저/함수/뷰/트리거 이관 지원
+- 🆕 **단위 작업 오류 제어**: `ignoreUnitWorkError`로 오류 발생 시 계속 진행 또는 중단
+- 🆕 **콘솔 로그 파일 동시 기록**: `console.*` 출력을 로그 파일에 자동 저장
+- 🆕 **Docker Compose 테스트 환경**: 로컬 MSSQL 테스트 환경 구성 지원
 
 ### 🆕 v0.9.1 주요 변경
 - `app.js --mode` 기반 비대화형 CLI 지원 (validate/test/migrate/help)
@@ -684,6 +690,14 @@ node src/migrate-cli.js migrate --query ./queries/migration-queries.xml
   - `true`: 소스 데이터의 비즈니스 키 값에 해당하는 타겟 데이터를 삭제 후 이관
     - ⚠️ **중요**: 삭제 시 기준이 되는 컬럼값을 각 쿼리의 `identityColumns` 속성에 명시해야 합니다
   - `false`: 삭제 없이 바로 이관 (UPSERT 형태)
+- `isCreateTable`: 타겟 테이블이 없을 때 자동 생성 여부 (기본값: false)
+  - `true`: 소스/타겟 메타데이터를 기반으로 타겟 테이블 자동 생성 (PK, 코멘트 포함)
+  - `false`: 기존 테이블 사용
+- `targetSchema`: 타겟 테이블 기본 스키마 (기본값: 없음)
+  - `targetTable`에 스키마가 포함되지 않은 경우 `<targetSchema>.<targetTable>`로 자동 조합
+- `ignoreUnitWorkError`: 단위 쿼리(테이블) 오류 발생 시 전체 작업 계속 진행 여부 (기본값: false)
+  - `true`: 오류 발생 쿼리를 실패 처리하고 다음 쿼리 계속 진행
+  - `false`: 오류 발생 시 전체 이관 즉시 중단
 
 ### 3. 쿼리 속성
 
@@ -711,6 +725,20 @@ node src/migrate-cli.js migrate --query ./queries/migration-queries.xml
   - `true`: 소스 데이터의 비즈니스 키 값으로 타겟 데이터 삭제 후 이관
     - ⚠️ **중요**: 삭제 시 기준이 되는 컬럼값을 `identityColumns` 속성에 반드시 명시해야 합니다
   - `false`: 삭제 없이 바로 이관
+- `targetSchema`: 개별 타겟 스키마 (글로벌 `settings.targetSchema` 오버라이드)
+- `isCreateTable`: 개별 테이블 자동 생성 여부 (글로벌 `settings.isCreateTable` 오버라이드)
+- `sourceQueryFile`: 별도 SQL 파일 사용 시 경로 (`sourceQuery` 요소 대신 사용)
+
+#### `sourceQuery` 요소 속성
+`sourceQuery` 요소를 사용할 때 다음 속성을 지정할 수 있습니다.
+- `targetTable`: 타겟 테이블명 (필수)
+- `targetSchema`: 타겟 스키마
+- `targetColumns`: 타겟 컬럼 목록
+- `identityColumns`: 비즈니스 키 컬럼 (삭제 기준)
+- `sourceQueryFile`: SQL 파일 경로
+- `applyGlobalColumns`: 전역 컬럼 오버라이드 선택 적용 (예: `all`, `created_date`)
+- `deleteBeforeInsert`: 이관 전 삭제 여부
+- `isCreateTable`: 타겟 테이블 자동 생성 여부
 
 ### 4. 데이터 삭제 방식
 
@@ -2941,6 +2969,171 @@ DEBUG_COMMENTS=true node src/migrate-cli.js migrate queries.xml
 # 스크립트 전체 처리 과정 확인
 DEBUG_SCRIPTS=true node src/migrate-cli.js migrate queries.xml
 ```
+
+## 🆕 v0.9.1 이후 추가 기능 및 속성
+
+### 1. 주요 변경 요약
+
+| 버전 | 주요 내용 |
+|------|-----------|
+| v0.10.1 | MSSQL 테스트용 `docker-compose.yml` 및 SQL 파일 추가 |
+| v0.10.2 | 3rd party 라이브러리 버전 업데이트 |
+| v0.11.1 | 데이터 입력 속도 개선, 타겟 테이블 자동 생성 기능 추가 |
+| v1.0.1 | 안정화 릴리스 |
+| v1.0.2 | `settings.isCreateTable` 전역 설정 추가 |
+| v1.0.3 | `targetSchema` 속성 추가 (settings/query/sourceQuery) |
+| v1.0.4 | 전/후처리 `enabled`, `runInTransaction` 속성 추가 |
+| v1.0.5 | 테이블 생성 시 PK/코멘트 적용 |
+| v1.0.6 | 테이블 생성 기능 개선 |
+| v1.0.7 | `SELECT *` 자동 확장 로직 개선 |
+| v1.1.0 | `resources` 섹션을 이용한 프로시저/함수/뷰/트리거 이관 |
+| v1.1.1 | 타겟 테이블이 비어 있을 때 불필요한 PK 삭제 skip |
+| v1.1.2 | `console.*` 출력을 로그 파일에 동시 기록 |
+| v1.1.3 | `ignoreUnitWorkError` 속성으로 단위 작업 오류 처리 제어 |
+
+### 2. XML 신규 속성 요약
+
+#### settings 추가 속성
+- `isCreateTable`: 타겟 테이블이 없을 때 자동 생성 여부 (기본값: `false`)
+- `targetSchema`: 타겟 테이블 기본 스키마
+- `ignoreUnitWorkError`: 단위 쿼리 오류 시 다음 쿼리 계속 진행 여부 (기본값: `false`)
+
+#### query / sourceQuery 추가 속성
+- `targetSchema`: 개별 타겟 스키마
+- `isCreateTable`: 개별 테이블 자동 생성 여부
+- `sourceQueryFile`: 별도 SQL 파일 경로
+- `applyGlobalColumns`: 전역 컬럼 오버라이드 선택 적용
+- `deleteBeforeInsert`: `sourceQuery` 요소 내에서도 사용 가능
+
+#### resources 속성
+- `id`: 리소스 식별자
+- `description`: 설명
+- `enabled`: 실행 여부 (`true`/`false`)
+- `type`: `procedure`, `function`, `view`, `trigger`
+- `name`: 소스 리소스 이름
+- `schema`: 소스 스키마
+- `targetName`: 타겟 리소스 이름 (생략 시 `name`과 동일)
+- `targetSchema`: 타겟 스키마
+- `dropBeforeCreate`: 생성 전 기존 리소스 삭제 여부 (`true`/`false`)
+
+#### 전/후처리 추가 속성
+- `enabled`: 전/후처리 실행 여부 (`true`/`false`)
+- `runInTransaction`: 트랜잭션 내에서 실행 여부
+- `database`: 실행 대상 DB (`source` 또는 `target`)
+- `applyGlobalColumns`: 스크립트 내 `SELECT *`/`INSERT` 시 컬럼 오버라이드 적용
+
+### 3. `targetSchema` 사용법
+
+`targetTable`에 스키마가 포함되지 않은 경우 `targetSchema`가 자동으로 조합됩니다.
+
+```xml
+<settings>
+  <targetSchema>dbo</targetSchema>
+</settings>
+
+<queries>
+  <query id="users" targetTable="users" enabled="true">
+    <sourceQuery targetTable="users" identityColumns="user_id" deleteBeforeInsert="true">
+      SELECT * FROM users
+    </sourceQuery>
+  </query>
+</queries>
+```
+
+결과적으로 타겟 테이블은 `dbo.users`로 처리됩니다. `targetTable`에 이미 `[dbo].[users]` 또는 `schema.table` 형식으로 스키마가 포함되어 있으면 중복 추가되지 않습니다.
+
+### 4. `isCreateTable` 사용법
+
+`isCreateTable="true"`이면 타겟 DB에 테이블이 없을 때 소스 테이블의 컬럼 메타데이터를 기반으로 테이블을 생성하고, Primary Key와 코멘트를 함께 적용합니다.
+
+```xml
+<settings>
+  <isCreateTable>true</isCreateTable>
+  <targetSchema>dbo</targetSchema>
+</settings>
+
+<queries>
+  <query id="new_table" targetTable="new_users" enabled="true">
+    <sourceQuery targetTable="new_users" identityColumns="user_id">
+      SELECT user_id, user_name FROM source_users
+    </sourceQuery>
+  </query>
+</queries>
+```
+
+개별 쿼리에서 글로벌 설정을 오버라이드할 수도 있습니다.
+
+```xml
+<query id="existing_table" targetTable="old_users" isCreateTable="false" enabled="true">
+```
+
+### 5. `ignoreUnitWorkError` 사용법
+
+단위 쿼리에서 오류가 발생해도 전체 이관을 계속 진행하려면 `true`로 설정합니다.
+
+```xml
+<settings>
+  <ignoreUnitWorkError>true</ignoreUnitWorkError>
+</settings>
+```
+
+- `true`: 오류가 발생한 쿼리는 `failedQueries`로 기록되고, 다음 쿼리부터 계속 이관
+- `false` 또는 미설정: 오류 발생 즉시 전체 이관 중단
+
+### 6. `resources` 리소스 이관
+
+`resources` 섹션을 사용하여 저장 프로시저, 함수, 뷰, 트리거를 소스 DB에서 타겟 DB로 이관할 수 있습니다.
+
+```xml
+<resources>
+  <resource id="usp_audit_log"
+            description="감사 로그 저장 프로시저"
+            enabled="true"
+            type="procedure"
+            name="usp_audit_log"
+            schema="dbo"
+            targetSchema="dbo"
+            targetName="usp_audit_log"
+            dropBeforeCreate="true"/>
+</resources>
+```
+
+지원하는 `type` 값: `procedure`, `function`, `view`, `trigger`.
+
+### 7. 콘솔 로그 파일 기록
+
+v1.1.2부터 `console.log`, `console.warn`, `console.error`, `console.info`, `console.debug` 출력이 콘솔과 `logs/migration-YYYY-MM-DD.log` 파일에 동시에 기록됩니다. 별도 설정 없이 `logger.js` 모듈이 자동으로 처리합니다.
+
+### 8. Docker Compose 테스트 환경
+
+v0.10.1부터 `docker-compose.yml`과 테스트용 SQL 파일이 포함되어 있습니다. 다음 명령으로 로컬 MSSQL 환경을 구성할 수 있습니다.
+
+```bash
+docker-compose up -d
+```
+
+`test/` 디렉토리의 SQL 파일을 사용하여 빠르게 테스트 DB를 구성할 수 있습니다.
+
+### 9. `SELECT *` 자동 확장 개선
+
+`SELECT *`이 포함된 소스 쿼리나 전/후처리 스크립트는 타겟 테이블의 실제 컬럼 메타데이터를 기준으로 자동 확장됩니다. IDENTITY 컬럼은 제외되며, `applyGlobalColumns` 설정에 따라 전역 컬럼 오버라이드 컬럼도 자동 추가될 수 있습니다.
+
+### 10. 전/후처리 스크립트 속성
+
+개별 쿼리의 `preProcess`/`postProcess`에 다음 속성을 적용할 수 있습니다.
+
+```xml
+<query id="migrate_users" targetTable="users" enabled="true">
+  <preProcess description="사용자 백업" enabled="true" runInTransaction="true" database="target" applyGlobalColumns="true">
+    <![CDATA[INSERT INTO backup_users SELECT * FROM users]]>
+  </preProcess>
+  <sourceQuery targetTable="users" identityColumns="user_id">
+    SELECT * FROM users WHERE status = 'ACTIVE'
+  </sourceQuery>
+</query>
+```
+
+---
 
 ## 📞 지원
 - Site Url : sql2db.com 

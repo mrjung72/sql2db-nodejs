@@ -1,5 +1,122 @@
 # SQL2DB Migration Tool Update Log
 
+## 🚀 v1.1.3 - Unit Work Error Control (2026-09-18)
+
+### ✨ New Features
+- Added `settings.ignoreUnitWorkError` attribute
+  - `true`: Mark the failed query as failed and continue to the next query when an error occurs
+  - `false`: Stop the entire migration when an error occurs
+- Enhanced per-query transaction support (with `ENABLE_TRANSACTION=true`, each query is rolled back/committed individually)
+
+### 🔧 Improvements
+- `mssql-data-migrator-modular.js`: per-query try/catch and transaction handling
+- `mssql-connection-manager.js`, `db/pk-deleter.js`: transaction-based `insertToTarget` and `deleteFromTargetByPK` support
+
+---
+
+## 🚀 v1.1.2 - Console Log to File (2026-09-18)
+
+### ✨ New Features
+- `console.log`, `console.warn`, `console.error`, `console.info`, and `console.debug` outputs are now also written to the log file (`logs/migration-YYYY-MM-DD.log`)
+- `logger.js` stores original `console` functions to prevent recursion
+
+---
+
+## 🚀 v1.1.1 - Data Deletion Stability Improvement (2026-09-17)
+
+### 🔧 Improvements
+- Skip PK-based deletion when the target table has no data (`deleteBeforeInsert`)
+- Improved performance and stability by avoiding unnecessary delete queries
+
+---
+
+## 🚀 v1.1.0 - Resource Migration (Procedure/Function/View/Trigger) (2026-09-17)
+
+### ✨ New Features
+- Support for `resources` section: migrate stored procedures, functions, views, and triggers from source to target
+- Resource attributes: `id`, `description`, `enabled`, `name`, `schema`, `targetSchema`, `targetName`, `type`, `dropBeforeCreate`
+
+---
+
+## 🚀 v1.0.7 - SELECT * Auto-Processing Improvement (2026-09-17)
+
+### 🔧 Improvements
+- Improved `SELECT *` automatic expansion logic
+- `SELECT *` in pre/post scripts and source queries is expanded based on target column metadata
+
+---
+
+## 🚀 v1.0.6 - Table Creation Improvement (2026-09-17)
+
+### 🔧 Improvements
+- When `isCreateTable=true`, the target table is created automatically
+- Primary Key and comments are applied when creating tables
+
+---
+
+## 🚀 v1.0.5 - PK/Comment Support for Table Creation (2026-09-17)
+
+### ✨ New Features
+- `isCreateTable` setting automatically applies Primary Key and comments when creating target tables
+
+---
+
+## 🚀 v1.0.4 - Pre/Post Processing Enable Attributes (2026-09-17)
+
+### ✨ New Features
+- Added `enabled`, `runInTransaction`, and other work-status attributes to pre/post-processing groups and individual processes
+
+---
+
+## 🚀 v1.0.3 - targetSchema Support (2026-09-17)
+
+### ✨ New Features
+- Added `settings.targetSchema`, `query.targetSchema`, and `sourceQuery.targetSchema` attributes
+- Automatically combines `targetSchema` with `targetTable` when schema is not already included
+- `buildQualifiedTableName()` prevents duplicate schema additions
+
+---
+
+## 🚀 v1.0.2 - isCreateTable Global Setting (2026-09-17)
+
+### ✨ New Features
+- Added `settings.isCreateTable` global setting
+- Can be overridden with `isCreateTable` attribute on individual queries
+
+---
+
+## 🚀 v1.0.1 - Stabilization Release (2026-09-17)
+
+### 🔧 Improvements
+- Version update and stabilization
+
+---
+
+## 🚀 v0.11.1 - Table Creation and Data Input Speed Improvement (2026-09-17)
+
+### ✨ New Features
+- Added target table auto-creation feature (`isCreateTable`)
+
+### 🔧 Improvements
+- Improved data input (batch insert) speed
+
+---
+
+## 🚀 v0.10.2 - 3rd Party Library Update (2026-09-16)
+
+### 🔧 Improvements
+- Updated dependency library versions
+
+---
+
+## 🚀 v0.10.1 - Test Environment Setup (2026-04-08)
+
+### ✨ New Features
+- Added `docker-compose.yml` and related SQL query files for MSSQL testing
+- Supports local test/development environment setup
+
+---
+
 ## 🚀 v0.9.1 - Non-interactive CLI & Docs (2025-10-29)
 
 ### ✨ New Features

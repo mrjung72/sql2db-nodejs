@@ -1,5 +1,122 @@
 # SQL2DB Migration Tool 업데이트 로그
 
+## 🚀 v1.1.3 - 단위작업 오류 제어 (2026-09-18)
+
+### ✨ 새로운 기능
+- `settings.ignoreUnitWorkError` 속성 추가
+  - `true`: 개별 쿼리(테이블)에서 오류 발생 시 해당 쿼리를 실패 처리하고 다음 쿼리 계속 진행
+  - `false`: 오류 발생 시 전체 이관 중단
+- 쿼리 단위 트랜잭션 지원 강화 (`ENABLE_TRANSACTION=true` 시 각 쿼리별 롤백/커밋)
+
+### 🔧 개선 사항
+- `mssql-data-migrator-modular.js`: 단위 쿼리 try/catch 및 트랜잭션 처리
+- `mssql-connection-manager.js`, `db/pk-deleter.js`: 트랜잭션 기반 `insertToTarget`, `deleteFromTargetByPK` 지원
+
+---
+
+## 🚀 v1.1.2 - 콘솔 로그 파일 기록 (2026-09-18)
+
+### ✨ 새로운 기능
+- `console.log`, `console.warn`, `console.error`, `console.info`, `console.debug` 출력을 로그 파일(`logs/migration-YYYY-MM-DD.log`)에도 동시 기록
+- `logger.js`에서 재귀 방지를 위해 원본 console 함수 보관
+
+---
+
+## 🚀 v1.1.1 - 데이터 삭제 안정성 개선 (2026-09-17)
+
+### 🔧 개선 사항
+- 타겟 테이블에 데이터가 없을 경우 `deleteBeforeInsert` 시 PK 기반 삭제 처리 skip
+- 불필요한 삭제 쿼리 실행 방지로 성능 및 안정성 향상
+
+---
+
+## 🚀 v1.1.0 - 리소스(프로시저/함수/뷰/트리거) 이관 (2026-09-17)
+
+### ✨ 새로운 기능
+- `resources` 섹션 지원: stored procedure, function, view, trigger를 소스에서 타겟으로 이관
+- 리소스 속성: `id`, `description`, `enabled`, `name`, `schema`, `targetSchema`, `targetName`, `type`, `dropBeforeCreate`
+
+---
+
+## 🚀 v1.0.7 - SELECT * 자동 처리 개선 (2026-09-17)
+
+### 🔧 개선 사항
+- `SELECT *` 패턴 자동 확장 로직 개선
+- 전/후처리 스크립트 및 소스 쿼리에서 `SELECT *`를 타겟 컬럼 메타데이터 기준으로 안정적으로 확장
+
+---
+
+## 🚀 v1.0.6 - 테이블 생성 기능 개선 (2026-09-17)
+
+### 🔧 개선 사항
+- `isCreateTable=true` 시 타겟 테이블 자동 생성
+- 생성 시 코멘트(Comment) 및 Primary Key 적용
+
+---
+
+## 🚀 v1.0.5 - 테이블 생성 시 PK/코멘트 지원 (2026-09-17)
+
+### ✨ 새로운 기능
+- `isCreateTable` 설정으로 타겟 테이블 생성 시 Primary Key, 코멘트 자동 적용
+
+---
+
+## 🚀 v1.0.4 - 전/후처리 작업 여부 속성 (2026-09-17)
+
+### ✨ 새로운 기능
+- 전/후처리 그룹 및 개별 처리에 `enabled`, `runInTransaction` 등 작업 여부 속성 추가 적용
+
+---
+
+## 🚀 v1.0.3 - targetSchema 지원 (2026-09-17)
+
+### ✨ 새로운 기능
+- `settings.targetSchema` 및 `query.targetSchema`, `sourceQuery.targetSchema` 속성 추가
+- `targetTable`에 스키마가 포함되지 않은 경우 자동으로 `targetSchema` 조합
+- `buildQualifiedTableName()`으로 스키마 중복 추가 방지
+
+---
+
+## 🚀 v1.0.2 - isCreateTable 전역 설정 (2026-09-17)
+
+### ✨ 새로운 기능
+- `settings.isCreateTable` 전역 설정 추가
+- 개별 쿼리의 `isCreateTable` 속성으로 오버라이드 가능
+
+---
+
+## 🚀 v1.0.1 - 안정화 릴리스 (2026-09-17)
+
+### 🔧 개선 사항
+- 버전 업데이트 및 안정화
+
+---
+
+## 🚀 v0.11.1 - 테이블 생성 및 데이터 입력 속도 개선 (2026-09-17)
+
+### ✨ 새로운 기능
+- 타겟 테이블 자동 생성 기능 추가 (`isCreateTable`)
+
+### 🔧 개선 사항
+- 데이터 입력(배치 insert) 속도 개선
+
+---
+
+## 🚀 v0.10.2 - 3rd Party 라이브러리 업데이트 (2026-09-16)
+
+### 🔧 개선 사항
+- 의존성 라이브러리 버전 업데이트
+
+---
+
+## 🚀 v0.10.1 - 테스트 환경 구성 (2026-04-08)
+
+### ✨ 새로운 기능
+- MSSQL 테스트용 `docker-compose.yml` 및 관련 SQL 쿼리 파일 추가
+- 로컬 테스트/개발 환경 구성 지원
+
+---
+
 ## 🚀 v0.9.1 - 비대화형 CLI 및 문서 (2025-10-29)
 
 ### ✨ 새로운 기능
