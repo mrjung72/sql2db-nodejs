@@ -72,6 +72,15 @@ class PKDeleter {
         return { rowsAffected: [0] };
       }
 
+      // 타겟 테이블이 비어있으면 DELETE 실행 없이 INSERT 단계로 넘어감
+      const countRequest = this.getTargetPool().request();
+      const countResult = await countRequest.query(`SELECT TOP 1 1 as hasRows FROM ${tableName}`);
+
+      if (countResult.recordset.length === 0) {
+        console.log(format(this.msg.skippingPkDelete, { table: tableName }));
+        return { rowsAffected: [0] };
+      }
+
       const identityColumnsDisplay = Array.isArray(identityColumns)
         ? identityColumns.join(', ')
         : identityColumns;
