@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const xml2js = require('xml2js');
+const sql = require('mssql');
 const logger = require('../logger');
 const { format } = require('../modules/i18n');
 const { getAppRoot } = require('../modules/paths');
@@ -218,6 +219,9 @@ class ConfigManager {
         if (settingsXml.isCreateTable) {
             settings.isCreateTable = settingsXml.isCreateTable === 'true';
         }
+        if (settingsXml.targetSchema) {
+            settings.targetSchema = settingsXml.targetSchema;
+        }
         
         return settings;
     }
@@ -365,6 +369,22 @@ class ConfigManager {
     }
 
     /**
+     * targetSchema와 targetTable을 조합한 전체 테이블명 생성
+     * (이미 schema가 포함된 tableName이면 중복 추가하지 않음)
+     */
+    buildQualifiedTableName(tableName, targetSchema) {
+        if (!targetSchema || !tableName) return tableName;
+        let parsed;
+        try {
+            parsed = sql.Table.parseName(tableName);
+        } catch (parseErr) {
+            parsed = { name: tableName, schema: null };
+        }
+        if (parsed.schema) return tableName;
+        return `${targetSchema}.${tableName}`;
+    }
+
+    /**
      * 쿼리 섹션 파싱
      */
     parseQueries(queriesXml, settings) {
@@ -418,9 +438,8 @@ class ConfigManager {
                 query.isCreateTable = q.isCreateTable !== undefined
                     ? (q.isCreateTable === 'true')
                     : (settings.isCreateTable || false);
-                query.targetSchema = q.targetSchema;
-                const targetTable = q.targetTable;
-                query.targetTable = query.targetSchema ? `${query.targetSchema}.${targetTable}` : targetTable;
+                query.targetSchema = q.targetSchema || settings.targetSchema;
+                query.targetTable = this.buildQualifiedTableName(q.targetTable, query.targetSchema);
                 query.targetColumns = q.targetColumns ? q.targetColumns.split(',').map(c => c.trim()) : [];
                 query.identityColumns = q.identityColumns;
             } else if (q.sourceQuery) {
@@ -443,9 +462,8 @@ class ConfigManager {
                     query.isCreateTable = q.sourceQuery.isCreateTable !== undefined
                         ? (q.sourceQuery.isCreateTable === 'true')
                         : (settings.isCreateTable || false);
-                    query.targetSchema = q.sourceQuery.targetSchema;
-                    const sqTargetTable = q.sourceQuery.targetTable;
-                    query.targetTable = query.targetSchema ? `${query.targetSchema}.${sqTargetTable}` : sqTargetTable;
+                    query.targetSchema = q.sourceQuery.targetSchema || q.targetSchema || settings.targetSchema;
+                    query.targetTable = this.buildQualifiedTableName(q.sourceQuery.targetTable, query.targetSchema);
                     query.targetColumns = q.sourceQuery.targetColumns 
                         ? q.sourceQuery.targetColumns.split(',').map(c => c.trim()) 
                         : [];
@@ -460,9 +478,8 @@ class ConfigManager {
                     query.isCreateTable = q.isCreateTable !== undefined
                         ? (q.isCreateTable === 'true')
                         : (settings.isCreateTable || false);
-                    query.targetSchema = q.targetSchema;
-                    const qTargetTable = q.targetTable;
-                    query.targetTable = query.targetSchema ? `${query.targetSchema}.${qTargetTable}` : qTargetTable;
+                    query.targetSchema = q.targetSchema || settings.targetSchema;
+                    query.targetTable = this.buildQualifiedTableName(q.targetTable, query.targetSchema);
                     query.targetColumns = q.targetColumns ? q.targetColumns.split(',').map(c => c.trim()) : [];
                     query.identityColumns = q.identityColumns;
                     query.sourceQuery = q.sourceQuery.trim();

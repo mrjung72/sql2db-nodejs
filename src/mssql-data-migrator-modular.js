@@ -1062,7 +1062,7 @@ class MSSQLDataMigrator {
             ];
             
             const validSettingsAttributes = [
-                'sourceDatabase', 'targetDatabase', 'batchSize', 'deleteBeforeInsert', 'isCreateTable'
+                'sourceDatabase', 'targetDatabase', 'batchSize', 'deleteBeforeInsert', 'isCreateTable', 'targetSchema'
             ];
             
             const validPrePostProcessAttributes = [
