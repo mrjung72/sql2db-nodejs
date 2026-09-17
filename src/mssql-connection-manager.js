@@ -977,7 +977,8 @@ class MSSQLConnectionManager {
 
             if (sourceTableName) {
                 const upperQuery = sourceQuery.toUpperCase();
-                const isComplexQuery = /\b(JOIN|UNION|INTERSECT|EXCEPT|APPLY|PIVOT|UNPIVOT|INTO|WITH)\b/.test(upperQuery);
+                // WITH (NOLOCK) 같은 테이블 힌트는 복잡 쿼리로 보지 않음.
+                const isComplexQuery = /\b(JOIN|UNION|INTERSECT|EXCEPT|APPLY|PIVOT|UNPIVOT|INTO)\b|\bWITH(?![\s]*\()/i.test(upperQuery);
                 if (isComplexQuery) {
                     console.log(`Source query contains JOIN/UNION/etc. Skipping comment/PK extraction.`);
                 } else {
@@ -1055,14 +1056,13 @@ class MSSQLConnectionManager {
                 : '';
 
             const tableCommentSql = tableComment
-                ? `EXEC sys.sp_addextendedproperty @name = N'MS_Description', @value = N'${tableComment.replace(/'/g, "''")}', @level0type = N'SCHEMA', @level0name = N'${safeTargetSchema}', @level1type = N'TABLE', @level1name = N'${safeTargetName}';`
+                ? `EXEC sys.sp_addextendedproperty @name = N'MS_Description', @value = N'${tableComment.replace(/'/g, "''")}', @level0type = N'SCHEMA', @level0name = N'${targetSchema}', @level1type = N'TABLE', @level1name = N'${targetName}';`
                 : '';
 
             const columnCommentSqls = columns.map(col => {
                 const comment = columnComments[col.name];
                 if (!comment) return '';
-                const safeColName = col.name.replace(/]/g, ']]');
-                return `EXEC sys.sp_addextendedproperty @name = N'MS_Description', @value = N'${comment.replace(/'/g, "''")}', @level0type = N'SCHEMA', @level0name = N'${safeTargetSchema}', @level1type = N'TABLE', @level1name = N'${safeTargetName}', @level2type = N'COLUMN', @level2name = N'${safeColName}';`;
+                return `EXEC sys.sp_addextendedproperty @name = N'MS_Description', @value = N'${comment.replace(/'/g, "''")}', @level0type = N'SCHEMA', @level0name = N'${targetSchema}', @level1type = N'TABLE', @level1name = N'${targetName}', @level2type = N'COLUMN', @level2name = N'${col.name}';`;
             }).filter(Boolean);
 
             const createQuery = `
@@ -1071,13 +1071,58 @@ class MSSQLConnectionManager {
                     CREATE TABLE ${fullName} (
                         ${columnDefinitions}${pkConstraint}
                     );
-                    ${tableCommentSql}
-                    ${columnCommentSqls.join('\n    ')}
                 END
             `;
 
+            // Extended properties must be added in a separate batch after the table is created,
+            // because the table/column metadata is not visible to system procedures
+            // until the CREATE TABLE batch completes.
+            const safeFullName = fullName.replace(/'/g, "''");
+            const commentStatements = [];
+            if (tableComment) {
+                commentStatements.push(`
+                    IF NOT EXISTS (
+                        SELECT 1 FROM sys.extended_properties
+                        WHERE major_id = OBJECT_ID('${safeFullName}', 'U')
+                          AND minor_id = 0
+                          AND name = N'MS_Description'
+                    )
+                    BEGIN
+                        EXEC sys.sp_addextendedproperty @name = N'MS_Description', @value = N'${tableComment.replace(/'/g, "''")}', @level0type = N'SCHEMA', @level0name = N'${targetSchema}', @level1type = N'TABLE', @level1name = N'${targetName}';
+                    END
+                `);
+            }
+
+            columns.forEach(col => {
+                const comment = columnComments[col.name];
+                if (!comment) return;
+                const safeComment = comment.replace(/'/g, "''");
+                commentStatements.push(`
+                    IF NOT EXISTS (
+                        SELECT 1
+                        FROM sys.extended_properties ep
+                        INNER JOIN sys.columns c
+                            ON ep.major_id = c.object_id AND ep.minor_id = c.column_id
+                        WHERE ep.major_id = OBJECT_ID('${safeFullName}', 'U')
+                          AND ep.name = N'MS_Description'
+                          AND c.name = N'${col.name.replace(/'/g, "''")}'
+                    )
+                    BEGIN
+                        EXEC sys.sp_addextendedproperty @name = N'MS_Description', @value = N'${safeComment}', @level0type = N'SCHEMA', @level0name = N'${targetSchema}', @level1type = N'TABLE', @level1name = N'${targetName}', @level2type = N'COLUMN', @level2name = N'${col.name.replace(/'/g, "''")}';
+                    END
+                `);
+            });
+
+            const addCommentsQuery = commentStatements.join('\n');
+
             const targetRequest = this.targetPool.request();
             await targetRequest.query(createQuery);
+
+            if (addCommentsQuery) {
+                const commentRequest = this.targetPool.request();
+                await commentRequest.query(addCommentsQuery);
+            }
+
             console.log(`Target table '${fullName}' created (or already exists) for data migration.`);
         } catch (error) {
             console.error(`Failed to create target table '${targetTable}': ${error.message}`);
