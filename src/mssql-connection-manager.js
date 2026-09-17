@@ -1145,7 +1145,7 @@ class MSSQLConnectionManager {
     }
 
     // Insert data into target database using bulk insert
-    async insertToTarget(tableName, columns, data) {
+    async insertToTarget(tableName, columns, data, transaction = null) {
         try {
             if (!this.isTargetConnected) {
                 await this.connectTarget();
@@ -1176,7 +1176,7 @@ class MSSQLConnectionManager {
                 table.rows.add(...values);
             }
 
-            const request = this.targetPool.request();
+            const request = transaction ? transaction.request() : this.targetPool.request();
             const result = await request.bulk(table);
             const rowCount = typeof result.rowsAffected === 'number'
                 ? result.rowsAffected
@@ -1211,8 +1211,8 @@ class MSSQLConnectionManager {
     }
 
     // Delete table data from target database (by PK)
-    async deleteFromTargetByPK(tableName, identityColumns, sourceData) {
-        return this.pkDeleter.deleteFromTargetByPK(tableName, identityColumns, sourceData);
+    async deleteFromTargetByPK(tableName, identityColumns, sourceData, transaction = null) {
+        return this.pkDeleter.deleteFromTargetByPK(tableName, identityColumns, sourceData, transaction);
     }
 
     // Delete all data from target table (used when considering FK order)

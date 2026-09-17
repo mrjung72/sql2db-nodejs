@@ -228,6 +228,9 @@ class ConfigManager {
         if (settingsXml.targetSchema) {
             settings.targetSchema = settingsXml.targetSchema;
         }
+        if (settingsXml.ignoreUnitWorkError !== undefined) {
+            settings.ignoreUnitWorkError = settingsXml.ignoreUnitWorkError === 'true';
+        }
         
         return settings;
     }

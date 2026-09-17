@@ -499,34 +499,34 @@ class MSSQLDataMigrator {
     /**
      * 개별 쿼리 이관 실행
      */
-    async executeQueryMigration(queryConfig) {
+    async executeQueryMigration(queryConfig, transaction = null) {
+        this.log(`\n${this.msg.queryMigrationStart} ${queryConfig.id} ===`);
+        this.log(`${this.msg.queryDescription} ${queryConfig.description}`);
+
         try {
-            this.log(`\n${this.msg.queryMigrationStart} ${queryConfig.id} ===`);
-            this.log(`${this.msg.queryDescription} ${queryConfig.description}`);
-            
             // 전처리 실행
             if (queryConfig.preProcess) {
                 this.log(`${this.msg.preProcessStart}`);
                 const preProcessHasTempTables = this.scriptProcessor.detectTempTableUsageInScript(queryConfig.preProcess.script);
                 const preResult = await this.scriptProcessor.executeProcessScript(
-                    queryConfig.preProcess, 
-                    'target', 
+                    queryConfig.preProcess,
+                    'target',
                     preProcessHasTempTables
                 );
-                
+
                 if (!preResult.success) {
                     throw new Error(`${queryConfig.id} ${this.msg.preProcessFailed} ${preResult.error}`);
                 }
                 this.log(`${this.msg.preProcessComplete}`);
             }
-            
+
             // 배치 크기 결정
             let batchSize = parseInt(process.env.BATCH_SIZE) || 1000;
             if (queryConfig.batchSize) {
                 const processedBatchSize = this.variableManager.replaceVariables(queryConfig.batchSize.toString());
                 batchSize = parseInt(processedBatchSize) || batchSize;
             }
-            
+
             // sourceQuery 검증
             const validationResult = this.queryProcessor.validateSingleSqlStatement(queryConfig.sourceQuery);
             if (!validationResult.isValid) {
@@ -536,7 +536,7 @@ class MSSQLDataMigrator {
 
             // 소스 데이터 조회
             const sourceData = await this.connectionManager.querySource(queryConfig.sourceQuery);
-            
+
             // PK 기준 삭제 처리
             if (queryConfig.sourceQueryDeleteBeforeInsert) {
                 this.log(`${this.msg.deletingBeforeInsert} ${queryConfig.targetTable}`);
@@ -544,15 +544,15 @@ class MSSQLDataMigrator {
                     const identityColumns = typeof queryConfig.identityColumns === 'string' && queryConfig.identityColumns.includes(',')
                         ? queryConfig.identityColumns.split(',').map(pk => pk.trim())
                         : queryConfig.identityColumns;
-                    await this.connectionManager.deleteFromTargetByPK(queryConfig.targetTable, identityColumns, sourceData);
+                    await this.connectionManager.deleteFromTargetByPK(queryConfig.targetTable, identityColumns, sourceData, transaction);
                 }
             }
-            
+
             if (sourceData.length === 0) {
                 this.log(this.msg.noDataToMigrate);
                 return { success: true, rowsProcessed: 0 };
             }
-            
+
             // globalColumnOverrides 선택 적용 (applyGlobalColumns 설정 기반)
             let processedData = sourceData;
             try {
@@ -577,45 +577,46 @@ class MSSQLDataMigrator {
             } catch (gcoError) {
                 this.log(`${this.msg.globalColumnNotApplied} (${gcoError.message})`);
             }
-            
+
             // 데이터 삽입
             const insertedRows = await this.insertDataInBatches(
                 queryConfig.targetTable,
                 queryConfig.targetColumns,
                 processedData,
                 batchSize,
-                queryConfig.id
+                queryConfig.id,
+                transaction
             );
-            
+
             // 후처리 실행
             if (queryConfig.postProcess) {
                 this.log(`${this.msg.postProcessStart}`);
                 const postProcessHasTempTables = this.scriptProcessor.detectTempTableUsageInScript(queryConfig.postProcess.script);
                 const postResult = await this.scriptProcessor.executeProcessScript(
-                    queryConfig.postProcess, 
-                    'target', 
+                    queryConfig.postProcess,
+                    'target',
                     postProcessHasTempTables
                 );
-                
+
                 if (!postResult.success) {
                     this.log(`${queryConfig.id} ${this.msg.postProcessFailed} ${postResult.error}`);
                 }
                 this.log(`${this.msg.postProcessComplete}`);
             }
-            
+
             this.log(`${this.msg.queryMigrationComplete} ${queryConfig.id} (${insertedRows}${this.msg.rowsProcessed}) ===\n`);
-            
+
             return { success: true, rowsProcessed: insertedRows };
         } catch (error) {
             this.log(`${this.msg.queryMigrationFailed} ${queryConfig.id} - ${error.message} ===\n`);
-            return { success: false, error: error.message, rowsProcessed: 0 };
+            throw error;
         }
     }
 
     /**
      * 배치 단위로 데이터 삽입
      */
-    async insertDataInBatches(tableName, columns, data, batchSize, queryId = null) {
+    async insertDataInBatches(tableName, columns, data, batchSize, queryId = null, transaction = null) {
         try {
             if (!data || data.length === 0) {
                 this.log(this.msg.noDataToInsert);
@@ -637,7 +638,7 @@ class MSSQLDataMigrator {
                 const rowsLabel = LANGUAGE === 'kr' ? `${batch.length}${this.msg.rows}` : `${batch.length} ${this.msg.rows}`;
                 this.log(`${this.msg.batchProcessing} ${batchNumber}/${totalBatches} ${processingLabel} (${rowsLabel})`);
                 
-                const result = await this.connectionManager.insertToTarget(tableName, columns, batch);
+                const result = await this.connectionManager.insertToTarget(tableName, columns, batch, transaction);
                 const batchInsertedRows = result.rowsAffected[0];
                 insertedRows += batchInsertedRows;
                 
@@ -746,6 +747,7 @@ class MSSQLDataMigrator {
         let totalProcessed = 0;
         let successCount = 0;
         let failureCount = 0;
+        let migrationAborted = false;
         const results = [];
         let isResuming = false;
         
@@ -847,23 +849,17 @@ class MSSQLDataMigrator {
                 this.log(`${this.msg.existingEstimatedRows} ${totalEstimatedRows.toLocaleString()}${this.msg.rows}`);
             }
             
-            // 트랜잭션 시작
-            let transaction = null;
-            if (this.enableTransaction) {
-                this.log(this.msg.transactionStart);
-                transaction = await this.connectionManager.beginTransaction();
-            }
+            this.progressManager.updatePhase('MIGRATING', 'RUNNING', 'Migrating data');
             
-            try {
-                this.progressManager.updatePhase('MIGRATING', 'RUNNING', 'Migrating data');
-                
-                // 각 쿼리 실행
-                for (const queryConfig of enabledQueries) {
-                    this.currentQuery = queryConfig;
-                    
+            // 각 쿼리 실행
+            for (const queryConfig of enabledQueries) {
+                let queryTransaction = null;
+                this.currentQuery = queryConfig;
+
+                try {
                     // SELECT * 처리 및 컬럼 오버라이드 적용
                     const processedQueryConfig = await this.queryProcessor.processQueryConfig(queryConfig, this.queryFilePath);
-                    
+
                     // columnOverrides 설정 - 선택적으로 전역 컬럼 오버라이드 적용
                     const selectedOverrides = await this.selectivelyApplyGlobalColumnOverrides(
                         this.config.globalColumnOverrides,
@@ -872,63 +868,71 @@ class MSSQLDataMigrator {
                         'target'
                     );
                     processedQueryConfig.columnOverrides = new Map(Object.entries(selectedOverrides));
-                    
+
                     this.progressManager.startQuery(queryConfig.id, queryConfig.description, 0);
-                    
-                    const result = await this.executeQueryMigration(processedQueryConfig);
+
+                    if (this.enableTransaction) {
+                        this.log(`${this.msg.transactionStart} (${queryConfig.id})`);
+                        queryTransaction = await this.connectionManager.beginTransaction();
+                    }
+
+                    const result = await this.executeQueryMigration(processedQueryConfig, queryTransaction);
+
+                    if (this.enableTransaction && queryTransaction) {
+                        this.log(this.msg.transactionCommit);
+                        await queryTransaction.commit();
+                    }
+
                     results.push({
                         queryId: queryConfig.id,
                         description: queryConfig.description,
                         ...result
                     });
-                    
+
                     totalProcessed += result.rowsProcessed;
-                    
-                    if (result.success) {
-                        successCount++;
-                        this.progressManager.completeQuery(queryConfig.id, {
-                            processedRows: result.rowsProcessed,
-                            insertedRows: result.rowsProcessed
-                        });
-                    } else {
-                        failureCount++;
-                        this.progressManager.failQuery(queryConfig.id, new Error(result.error || 'Unknown error'));
-                        
-                        if (this.enableTransaction && transaction) {
-                            this.log(this.msg.transactionRollback);
-                            await transaction.rollback();
-                            const errorMsg = LANGUAGE === 'kr' ? `쿼리 실행 실패: ${queryConfig.id}` : `Query execution failed: ${queryConfig.id}`;
-                            throw new Error(errorMsg);
+                    successCount++;
+                    this.progressManager.completeQuery(queryConfig.id, {
+                        processedRows: result.rowsProcessed,
+                        insertedRows: result.rowsProcessed
+                    });
+                } catch (error) {
+                    if (this.enableTransaction && queryTransaction) {
+                        try {
+                            await queryTransaction.rollback();
+                            this.log(this.msg.transactionRollbackComplete);
+                        } catch (rollbackError) {
+                            this.log(`${this.msg.transactionRollbackFailed} ${rollbackError.message}`);
                         }
                     }
-                    
+
+                    const errorMsg = `${this.msg.queryMigrationFailed || 'Query migration failed'} ${queryConfig.id} - ${error.message}`;
+                    this.log(errorMsg);
+
+                    failureCount++;
+                    this.progressManager.failQuery(queryConfig.id, error);
+                    results.push({
+                        queryId: queryConfig.id,
+                        description: queryConfig.description,
+                        success: false,
+                        error: error.message,
+                        rowsProcessed: 0
+                    });
+
+                    if (!this.config.settings || this.config.settings.ignoreUnitWorkError !== true) {
+                        throw error;
+                    }
+                } finally {
                     this.currentQuery = null;
                 }
-                
-                // 트랜잭션 커밋
-                if (this.enableTransaction && transaction) {
-                    this.log(this.msg.transactionCommit);
-                    await transaction.commit();
-                }
-                
-                // 전역 후처리 그룹 실행
-                if (this.config.globalProcesses && this.config.globalProcesses.postProcessGroups) {
-                    await this.scriptProcessor.executeGlobalProcessGroups('postProcess', this.config, this.progressManager);
-                }
-                
-            } catch (error) {
-                if (this.enableTransaction && transaction) {
-                    try {
-                        await transaction.rollback();
-                        this.log(this.msg.transactionRollbackComplete);
-                    } catch (rollbackError) {
-                        this.log(`${this.msg.transactionRollbackFailed} ${rollbackError.message}`);
-                    }
-                }
-                throw error;
+            }
+
+            // 전역 후처리 그룹 실행
+            if (this.config.globalProcesses && this.config.globalProcesses.postProcessGroups) {
+                await this.scriptProcessor.executeGlobalProcessGroups('postProcess', this.config, this.progressManager);
             }
             
         } catch (error) {
+            migrationAborted = true;
             this.log(`${this.msg.migrationProcessError} ${error.message}`);
             
             if (this.progressManager) {
@@ -943,7 +947,7 @@ class MSSQLDataMigrator {
             const endTime = Date.now();
             duration = (endTime - startTime) / 1000;
             
-            if (this.progressManager && failureCount === 0) {
+            if (this.progressManager && !migrationAborted) {
                 this.progressManager.completeMigration();
             }
             
@@ -1165,7 +1169,7 @@ class MSSQLDataMigrator {
             ];
             
             const validSettingsAttributes = [
-                'sourceDatabase', 'targetDatabase', 'batchSize', 'deleteBeforeInsert', 'isCreateTable', 'targetSchema'
+                'sourceDatabase', 'targetDatabase', 'batchSize', 'deleteBeforeInsert', 'isCreateTable', 'targetSchema', 'ignoreUnitWorkError'
             ];
             
             const validPrePostProcessAttributes = [

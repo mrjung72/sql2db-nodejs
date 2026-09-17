@@ -10,7 +10,7 @@ class PKDeleter {
     this.msg = msg;
   }
 
-  async deleteFromTargetByPK(tableName, identityColumns, sourceData) {
+  async deleteFromTargetByPK(tableName, identityColumns, sourceData, transaction = null) {
     try {
       const pool = this.getTargetPool();
       if (!pool || !pool.connected) {
@@ -120,7 +120,7 @@ class PKDeleter {
         }
 
         let deleteQuery;
-        const request = this.getTargetPool().request();
+        const request = transaction ? transaction.request() : this.getTargetPool().request();
 
         if (isCompositeKey) {
           const conditions = chunk
@@ -200,7 +200,7 @@ class PKDeleter {
 
         if (deletedCount === 0 && chunk.length > 0) {
           try {
-            const checkRequest = this.getTargetPool().request();
+            const checkRequest = transaction ? transaction.request() : this.getTargetPool().request();
             const checkQuery = `SELECT COUNT(*) as cnt FROM ${tableName}`;
             const checkResult = await checkRequest.query(checkQuery);
             const totalRows = checkResult.recordset[0].cnt;
@@ -212,7 +212,7 @@ class PKDeleter {
 
               if (process.env.LOG_LEVEL === 'DEBUG' || process.env.LOG_LEVEL === 'TRACE') {
                 const firstPkValue = chunk[0];
-                const testRequest = this.getTargetPool().request();
+                const testRequest = transaction ? transaction.request() : this.getTargetPool().request();
 
                 if (isCompositeKey) {
                   const testConditions = normalizedIdentityColumns
@@ -236,7 +236,7 @@ class PKDeleter {
                   const testResult = await testRequest.query(testQuery);
                   console.log(format(this.msg.debugSamplePk, { value: firstPkValue }));
 
-                  const sampleRequest = this.getTargetPool().request();
+                  const sampleRequest = transaction ? transaction.request() : this.getTargetPool().request();
                   const sampleQuery = `SELECT TOP 5 ${normalizedIdentityColumns} FROM ${tableName}`;
                   const sampleResult = await sampleRequest.query(sampleQuery);
                   console.log(format(this.msg.debugTargetPkSample, { column: normalizedIdentityColumns, values: JSON.stringify(sampleResult.recordset.map((r) => r[normalizedIdentityColumns])) }));
