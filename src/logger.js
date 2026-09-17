@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const util = require('util');
 const { getAppRoot } = require('./modules/paths');
 const { format } = require('./modules/i18n');
 
@@ -52,6 +53,13 @@ const msg = messages[LANGUAGE] || messages.en;
 
 class Logger {
     constructor() {
+        // console 캡처 시 재귀 방지를 위해 원본 console 함수 보관
+        this._originalConsoleLog = console.log.bind(console);
+        this._originalConsoleInfo = console.info.bind(console);
+        this._originalConsoleWarn = console.warn.bind(console);
+        this._originalConsoleError = console.error.bind(console);
+        this._originalConsoleDebug = console.debug ? console.debug.bind(console) : console.log.bind(console);
+
         this.logLevel = this.getLogLevel();
         this.logLevels = {
             ERROR: 0,
@@ -86,14 +94,14 @@ class Logger {
                 fs.mkdirSync(this.logDir, { recursive: true });
             }
         } catch (error) {
-            console.warn(format(msg.logDirCreateFailed, { message: error.message }));
+            this._originalConsoleWarn(format(msg.logDirCreateFailed, { message: error.message }));
             this.logDir = path.join(process.cwd(), 'logs');
             try {
                 if (!fs.existsSync(this.logDir)) {
                     fs.mkdirSync(this.logDir, { recursive: true });
                 }
             } catch (fallbackError) {
-                console.error(format(msg.logDirCreateFailedFallback, { message: fallbackError.message }));
+                this._originalConsoleError(format(msg.logDirCreateFailedFallback, { message: fallbackError.message }));
             }
         }
         
@@ -180,7 +188,47 @@ class Logger {
             const fileMessage = message.replace(/\x1b\[[0-9;]*m/g, '');
             fs.appendFileSync(this.logFile, fileMessage + '\n');
         } catch (error) {
-            console.error(format(msg.logFileWriteFailed, { message: error.message }));
+            this._originalConsoleError(format(msg.logFileWriteFailed, { message: error.message }));
+        }
+    }
+
+    _writeConsoleToLog(level, args) {
+        if (!this.shouldLog(level)) {
+            return;
+        }
+        const text = util.format(...args);
+        const formattedMessage = this.formatMessage(level, text);
+        this.writeToFile(formattedMessage);
+    }
+
+    captureConsoleOutput() {
+        const self = this;
+
+        console.log = function(...args) {
+            self._writeConsoleToLog(self.logLevels.INFO, args);
+            self._originalConsoleLog.apply(console, args);
+        };
+
+        console.info = function(...args) {
+            self._writeConsoleToLog(self.logLevels.INFO, args);
+            self._originalConsoleInfo.apply(console, args);
+        };
+
+        console.warn = function(...args) {
+            self._writeConsoleToLog(self.logLevels.WARN, args);
+            self._originalConsoleWarn.apply(console, args);
+        };
+
+        console.error = function(...args) {
+            self._writeConsoleToLog(self.logLevels.ERROR, args);
+            self._originalConsoleError.apply(console, args);
+        };
+
+        if (console.debug) {
+            console.debug = function(...args) {
+                self._writeConsoleToLog(self.logLevels.DEBUG, args);
+                self._originalConsoleDebug.apply(console, args);
+            };
         }
     }
     
@@ -190,7 +238,7 @@ class Logger {
         }
         
         const formattedMessage = this.formatMessage(level, message, data);
-        console.log(formattedMessage);
+        this._originalConsoleLog(formattedMessage);
         this.writeToFile(formattedMessage);
     }
     
@@ -318,5 +366,8 @@ class Logger {
 
 // 싱글톤 인스턴스 생성
 const logger = new Logger();
+
+// 콘솔 출력을 로그 파일에도 함께 기록
+logger.captureConsoleOutput();
 
 module.exports = logger; 
