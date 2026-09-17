@@ -83,13 +83,32 @@ class ScriptProcessor {
      * 전역 전/후처리 그룹 실행
      */
     async executeGlobalProcessGroups(phase, config, progressManager) {
-        const groups = phase === 'preProcess' 
-            ? config.globalProcesses.preProcessGroups 
+        const globalProcesses = config.globalProcesses;
+
+        // globalProcesses 전체가 비활성화된 경우
+        if (globalProcesses && globalProcesses.enabled === false) {
+            const phaseText = phase === 'preProcess' ? msg.preProcess : msg.postProcess;
+            this.log(`Global processes disabled. Skipping ${phaseText} groups.`);
+            return;
+        }
+
+        // phase 그룹 래퍼가 비활성화된 경우
+        const wrapperEnabled = phase === 'preProcess'
+            ? globalProcesses.preProcessGroupsEnabled
+            : globalProcesses.postProcessGroupsEnabled;
+        if (wrapperEnabled === false) {
+            const phaseText = phase === 'preProcess' ? msg.preProcess : msg.postProcess;
+            this.log(`Global ${phaseText} groups disabled. Skipping.`);
+            return;
+        }
+
+        const groups = phase === 'preProcess'
+            ? config.globalProcesses.preProcessGroups
             : config.globalProcesses.postProcessGroups;
-        
+
         const enabledGroups = groups.filter(group => group.enabled);
         const phaseText = phase === 'preProcess' ? msg.preProcess : msg.postProcess;
-        
+
         if (enabledGroups.length === 0) {
             this.log(format(msg.noActiveGroups, { phase: phaseText }));
             return;

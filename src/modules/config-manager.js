@@ -287,17 +287,31 @@ class ConfigManager {
      * 전역 전/후처리 그룹 파싱
      */
     parseGlobalProcesses(processesXml) {
+        const parseEnabled = (value) => value === undefined || value === 'true' || value === true;
+
         const globalProcesses = {
+            enabled: parseEnabled(processesXml.enabled),
+            preProcessGroupsEnabled: parseEnabled(processesXml.preProcessGroups?.enabled),
+            postProcessGroupsEnabled: parseEnabled(processesXml.postProcessGroups?.enabled),
             preProcessGroups: [],
             postProcessGroups: []
         };
-        
+
+        // globalProcesses 전체가 비활성화면 그룹 파싱 자체를 생략
+        if (globalProcesses.enabled === false) {
+            logger.info('전역 전/후처리 그룹이 비활성화되어 파싱을 생략합니다.', {
+                enabled: false
+            });
+            return globalProcesses;
+        }
+
         // 전역 전처리 그룹 파싱
-        if (processesXml.preProcessGroups && processesXml.preProcessGroups.group) {
+        if (globalProcesses.preProcessGroupsEnabled &&
+            processesXml.preProcessGroups && processesXml.preProcessGroups.group) {
             const preGroups = Array.isArray(processesXml.preProcessGroups.group)
                 ? processesXml.preProcessGroups.group
                 : [processesXml.preProcessGroups.group];
-            
+
             preGroups.forEach(group => {
                 if (group.id && group._) {
                     globalProcesses.preProcessGroups.push({
@@ -309,13 +323,14 @@ class ConfigManager {
                 }
             });
         }
-        
+
         // 전역 후처리 그룹 파싱
-        if (processesXml.postProcessGroups && processesXml.postProcessGroups.group) {
+        if (globalProcesses.postProcessGroupsEnabled &&
+            processesXml.postProcessGroups && processesXml.postProcessGroups.group) {
             const postGroups = Array.isArray(processesXml.postProcessGroups.group)
                 ? processesXml.postProcessGroups.group
                 : [processesXml.postProcessGroups.group];
-            
+
             postGroups.forEach(group => {
                 if (group.id && group._) {
                     globalProcesses.postProcessGroups.push({
@@ -327,14 +342,17 @@ class ConfigManager {
                 }
             });
         }
-        
+
         logger.info('전역 전/후처리 그룹 로드됨', {
+            enabled: globalProcesses.enabled,
+            preProcessGroupsEnabled: globalProcesses.preProcessGroupsEnabled,
+            postProcessGroupsEnabled: globalProcesses.postProcessGroupsEnabled,
             preProcessGroups: globalProcesses.preProcessGroups.length,
             postProcessGroups: globalProcesses.postProcessGroups.length,
             enabledPreGroups: globalProcesses.preProcessGroups.filter(g => g.enabled).map(g => g.id),
             enabledPostGroups: globalProcesses.postProcessGroups.filter(g => g.enabled).map(g => g.id)
         });
-        
+
         return globalProcesses;
     }
 

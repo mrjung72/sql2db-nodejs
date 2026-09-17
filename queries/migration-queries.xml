@@ -43,9 +43,9 @@
   </globalColumnOverrides>
 
   <!-- 전역 전처리/후처리 그룹 -->
-  <globalProcesses>
+  <globalProcesses enabled="true">
     <!-- 전체 이관 시작 전 실행 그룹들 -->
-    <preProcessGroups>
+    <preProcessGroups enabled="true">
      
       <group id="logging" description="마이그레이션 로그 초기화" enabled="true">
         <![CDATA[
@@ -78,7 +78,7 @@
     </preProcessGroups>
     
     <!-- 전체 이관 완료 후 실행 그룹들 -->
-    <postProcessGroups>
+    <postProcessGroups enabled="true">
       <group id="activate_foreign_keys" description="FK 제약조건 활성화" enabled="false">
         <![CDATA[
           -- 외래키 제약조건 다시 활성화
