@@ -313,8 +313,8 @@ class QueryProcessor {
                 await this.connectionManager.createTargetTableFromSourceQuery(queryConfig.targetTable, queryConfig.sourceQuery);
             }
 
-            // SELECT * 패턴 감지 및 처리
-            const selectAllPattern = /SELECT\s+\*\s+FROM\s+(\w+)(?:\s+(?:AS\s+)?(?!WHERE|GROUP|HAVING|ORDER|LIMIT|OFFSET|UNION|INTERSECT|EXCEPT|FOR|OPTION|WITH\b)(\w+))?(?:\s+(?:WHERE|GROUP|HAVING|ORDER|LIMIT|OFFSET|UNION|INTERSECT|EXCEPT|FOR|OPTION|WITH)|\s*$)/i;
+            // SELECT * 패턴 감지 및 처리 (SELECT TOP n * FROM ... 도 지원)
+            const selectAllPattern = /SELECT\s+(?:(?:ALL|DISTINCT)\s+)?(?:TOP\s*(?:\(\s*\d+\s*\)|\d+)(?:\s+WITH\s+TIES)?\s+)?\*\s+FROM\s+(\w+)(?:\s+(?:AS\s+)?(?!WHERE|GROUP|HAVING|ORDER|LIMIT|OFFSET|UNION|INTERSECT|EXCEPT|FOR|OPTION|WITH\b)(\w+))?(?:\s+(?:WHERE|GROUP|HAVING|ORDER|LIMIT|OFFSET|UNION|INTERSECT|EXCEPT|FOR|OPTION|WITH)|\s*$)/i;
             const match = queryConfig.sourceQuery.match(selectAllPattern);
             
             if (match) {
@@ -350,7 +350,7 @@ class QueryProcessor {
                 }
                 
                 queryConfig.sourceQuery = queryConfig.sourceQuery.replace(/[;]+$/, '');
-                queryConfig.sourceQuery = queryConfig.sourceQuery.replace(/SELECT\s+\*/i, `SELECT ${explicitColumns}`);
+                queryConfig.sourceQuery = queryConfig.sourceQuery.replace(/SELECT\s+((?:(?:ALL|DISTINCT)\s+)?(?:TOP\s*(?:\(\s*\d+\s*\)|\d+)(?:\s+WITH\s+TIES)?\s+)?)\*/i, `SELECT $1${explicitColumns}`);
                 this.log(format(msg.modifiedSourceQuery, { query: queryConfig.sourceQuery }));
             }
             
